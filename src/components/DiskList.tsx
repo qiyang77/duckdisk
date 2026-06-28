@@ -90,7 +90,7 @@ const DiskList = () => {
           >
             Grant Full Disk Access
           </button>
-          <div className="text-xs text-slate-400">v. {appVersion}</div>
+          <div className="text-xs text-slate-400">v {appVersion}</div>
         </div>
       </div>
     </div>

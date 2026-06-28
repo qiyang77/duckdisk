@@ -10,12 +10,16 @@ import duckIcon from "../assets/duck-scan.png";
 type ScanStatus = {
   items: number;
   total: number;
-  errors: number;
+  operationNotPermitted: number;
+  permissionDenied: number;
+  interrupted: number;
+  other: number;
 };
 
 type ScanPhase =
   | "checkingCache"
   | "scanning"
+  | "incremental"
   | "finalizing"
   | "preparing"
   | "rendering"
@@ -67,6 +71,25 @@ type DragPreview = {
   node: DiskItem;
   x: number;
   y: number;
+};
+
+type ScanErrorCounts = {
+  operationNotPermitted: number;
+  permissionDenied: number;
+  interrupted: number;
+  other: number;
+};
+
+type ScanErrorRecord = {
+  operation: string;
+  path: string;
+  reason: string;
+  kind: keyof ScanErrorCounts;
+};
+
+type ScanErrorReport = {
+  counts: ScanErrorCounts;
+  records: ScanErrorRecord[];
 };
 
 const bytesFormatter = new Intl.NumberFormat(undefined, {
@@ -155,6 +178,8 @@ const phaseLabel = (phase: ScanPhase, disk: string) => {
       return `Checking cached scan for ${disk}`;
     case "scanning":
       return `Scanning ${disk}`;
+    case "incremental":
+      return `Updating cached scan for ${disk}`;
     case "finalizing":
       return "Saving scan result";
     case "preparing":
@@ -167,6 +192,39 @@ const phaseLabel = (phase: ScanPhase, disk: string) => {
 };
 
 const emptyStats = { items: 0, files: 0, folders: 0, size: 0 };
+const emptyScanErrorCounts = {
+  operationNotPermitted: 0,
+  permissionDenied: 0,
+  interrupted: 0,
+  other: 0,
+};
+const emptyScanErrorReport = {
+  counts: emptyScanErrorCounts,
+  records: [],
+};
+
+const totalScanIssues = (counts: ScanErrorCounts) =>
+  counts.operationNotPermitted +
+  counts.permissionDenied +
+  counts.interrupted +
+  counts.other;
+
+const hasPermissionIssues = (counts: ScanErrorCounts) =>
+  counts.operationNotPermitted > 0 || counts.permissionDenied > 0;
+
+const formatScanIssueCounts = (counts: ScanErrorCounts) => {
+  const parts = [
+    `not permitted ${counts.operationNotPermitted}`,
+    `denied ${counts.permissionDenied}`,
+    `interrupted ${counts.interrupted}`,
+  ];
+
+  if (counts.other) {
+    parts.push(`other ${counts.other}`);
+  }
+
+  return parts.join(" - ");
+};
 
 const buildIndex = (root: DiskItem | null, deletedIds = new Set<string>()) => {
   const parentMap = new Map<string, DiskItem | null>();
@@ -348,6 +406,9 @@ const Scanning = () => {
   const [status, setStatus] = useState<ScanStatus | null>(null);
   const [scanPhase, setScanPhase] = useState<ScanPhase>("checkingCache");
   const [scanError, setScanError] = useState<string | null>(null);
+  const [scanIssueReport, setScanIssueReport] =
+    useState<ScanErrorReport>(emptyScanErrorReport);
+  const [showScanIssues, setShowScanIssues] = useState(false);
   const [rootNode, setRootNode] = useState<DiskItem | null>(null);
   const [currentNode, setCurrentNode] = useState<DiskItem | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -377,6 +438,10 @@ const Scanning = () => {
       setScanPhase("finalizing");
     });
 
+    const unlistenIncremental = listen("scan_incremental", () => {
+      setScanPhase("incremental");
+    });
+
     const unlistenFailed = listen("scan_failed", (event: any) => {
       setScanError(String(event.payload));
       setScanPhase("failed");
@@ -385,7 +450,15 @@ const Scanning = () => {
     const unlistenCompleted = listen("scan_completed", async (event: any) => {
       try {
         setScanPhase("preparing");
-        const payload = event.payload as { path: string };
+        const payload = event.payload as { path: string; errorsPath: string };
+        if (payload.errorsPath) {
+          const errorReport = await invoke<string>("read_scan_error_report", {
+            path: payload.errorsPath,
+          });
+          setScanIssueReport(JSON.parse(errorReport));
+        } else {
+          setScanIssueReport(emptyScanErrorReport);
+        }
         const scanResult = await invoke<string>("read_scan_result", {
           path: payload.path,
           scanPath: disk,
@@ -428,6 +501,8 @@ const Scanning = () => {
       setScanError(null);
       setRootNode(null);
       setCurrentNode(null);
+      setScanIssueReport(emptyScanErrorReport);
+      setShowScanIssues(false);
       setDeleteList([]);
       setDeletedIds(new Set());
       setScanPhase(scanNonce === 0 ? "checkingCache" : "scanning");
@@ -440,10 +515,19 @@ const Scanning = () => {
           });
 
           if (!disposed && cached) {
-            setLoadedFromCache(true);
-            setScanPhase("preparing");
-            worker.current?.postMessage(cached);
-            return;
+            const hasIndex = await invoke<boolean>("has_cached_scan_index", {
+              scanPath: disk,
+              ratio,
+            });
+
+            if (hasIndex) {
+              setLoadedFromCache(true);
+              setScanIssueReport(emptyScanErrorReport);
+              setScanPhase("incremental");
+              scanningStarted = true;
+              invoke("start_scanning", { path: disk, ratio, useCache: true });
+              return;
+            }
           }
         } catch (error) {
           console.warn("Could not read cached scan result", error);
@@ -457,7 +541,7 @@ const Scanning = () => {
       setLoadedFromCache(false);
       setScanPhase("scanning");
       scanningStarted = true;
-      invoke("start_scanning", { path: disk, ratio });
+      invoke("start_scanning", { path: disk, ratio, useCache: false });
     };
 
     start();
@@ -466,6 +550,7 @@ const Scanning = () => {
       disposed = true;
       unlistenStatus.then((dispose) => dispose());
       unlistenFinalizing.then((dispose) => dispose());
+      unlistenIncremental.then((dispose) => dispose());
       unlistenFailed.then((dispose) => dispose());
       unlistenCompleted.then((dispose) => dispose());
       worker.current?.terminate();
@@ -563,6 +648,9 @@ const Scanning = () => {
   const currentSize = currentStats.size;
   const rootSize = rootNode ? statsMap.get(rootNode.id)?.size || 0 : 0;
   const scannedTotal = status?.total || 0;
+  const issueCount = totalScanIssues(scanIssueReport.counts);
+  const canOpenScanIssues =
+    issueCount > 0 || loadedFromCache;
   const scanPercent =
     used > 0 ? Math.min(100, (Math.min(scannedTotal, used) / used) * 100) : 0;
   const topBlocks = childRows
@@ -585,7 +673,12 @@ const Scanning = () => {
     });
   };
 
-  const startRescan = () => {
+  const startRescan = async () => {
+    if (loadedFromCache) {
+      await invoke("clear_cached_scan_result", { scanPath: disk, ratio }).catch(
+        console.error
+      );
+    }
     setLoadedFromCache(false);
     setScanNonce((current) => current + 1);
   };
@@ -698,7 +791,7 @@ const Scanning = () => {
                 ? `${status.items.toLocaleString()} files - ${formatBytes(
                     status.total
                   )}${used > 0 ? ` - ${scanPercent.toFixed(1)}%` : ""}${
-                    status.errors ? ` - ${status.errors} errors` : ""
+                    totalScanIssues(status) ? ` - ${formatScanIssueCounts(status)}` : ""
                   }`
                 : "Waiting for scan progress"}
             </div>
@@ -772,10 +865,18 @@ const Scanning = () => {
         </div>
         <div className="flex items-start gap-2">
           <button
+            onClick={() => setShowScanIssues(true)}
+            disabled={!canOpenScanIssues}
+            className="rounded border border-slate-700 px-3 py-2 text-xs font-medium text-slate-100 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Scan Issues
+            {issueCount ? ` ${issueCount}` : ""}
+          </button>
+          <button
             onClick={startRescan}
             className="rounded border border-slate-700 px-3 py-2 text-xs font-medium text-slate-100 hover:bg-slate-800"
           >
-            Rescan
+            {loadedFromCache ? "Clean Cache & Rescan" : "Rescan"}
           </button>
           <button
             onClick={() => currentNode && reveal(currentNode)}
@@ -1116,6 +1217,109 @@ const Scanning = () => {
           }}
         >
           {getNodeName(dragPreview.node)}
+        </div>
+      )}
+      {showScanIssues && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-6">
+          <div className="flex max-h-[82vh] w-full max-w-5xl flex-col overflow-hidden rounded border border-slate-600 bg-[#0b1220] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-700 bg-[#0f172a] px-4 py-3">
+              <div>
+                <div className="text-sm font-semibold text-white">
+                  Scan Issues
+                </div>
+                <div className="mt-1 text-xs text-slate-400">
+                  {issueCount
+                    ? formatScanIssueCounts(scanIssueReport.counts)
+                    : "No scan issues recorded for this result"}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {(hasPermissionIssues(scanIssueReport.counts) || loadedFromCache) && (
+                  <button
+                    onClick={() => invoke("open_full_disk_access_settings")}
+                    className="rounded border border-sky-500/70 px-3 py-1.5 text-xs font-medium text-sky-100 hover:bg-sky-500/15"
+                  >
+                    Grant Full Disk Access
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowScanIssues(false)}
+                  className="rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-4 gap-px border-b border-slate-700 bg-slate-700 text-xs">
+              <div className="bg-[#111827] px-3 py-2">
+                <div className="text-slate-500">Not permitted</div>
+                <div className="mt-1 font-semibold text-slate-100">
+                  {scanIssueReport.counts.operationNotPermitted.toLocaleString()}
+                </div>
+              </div>
+              <div className="bg-[#111827] px-3 py-2">
+                <div className="text-slate-500">Permission denied</div>
+                <div className="mt-1 font-semibold text-slate-100">
+                  {scanIssueReport.counts.permissionDenied.toLocaleString()}
+                </div>
+              </div>
+              <div className="bg-[#111827] px-3 py-2">
+                <div className="text-slate-500">Interrupted</div>
+                <div className="mt-1 font-semibold text-slate-100">
+                  {scanIssueReport.counts.interrupted.toLocaleString()}
+                </div>
+              </div>
+              <div className="bg-[#111827] px-3 py-2">
+                <div className="text-slate-500">Other</div>
+                <div className="mt-1 font-semibold text-slate-100">
+                  {scanIssueReport.counts.other.toLocaleString()}
+                </div>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto bg-[#0b1220]">
+              {scanIssueReport.records.length ? (
+                <table className="w-full border-collapse text-xs">
+                  <thead>
+                    <tr>
+                      <TableHeader>Reason</TableHeader>
+                      <TableHeader>Operation</TableHeader>
+                      <TableHeader>Path</TableHeader>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scanIssueReport.records.map((record, index) => (
+                      <tr
+                        key={`${record.path}-${index}`}
+                        className="bg-[#0b1220] hover:bg-[#111827]"
+                      >
+                        <td className="whitespace-nowrap border-b border-slate-800 px-2 py-1.5 text-slate-200">
+                          {record.reason}
+                        </td>
+                        <td className="whitespace-nowrap border-b border-slate-800 px-2 py-1.5 text-slate-300">
+                          {record.operation}
+                        </td>
+                        <td className="border-b border-slate-800 px-2 py-1.5 text-slate-300">
+                          <button
+                            onClick={() => reveal({ id: record.path } as DiskItem)}
+                            className="max-w-[48rem] truncate text-left hover:underline"
+                            title={record.path}
+                          >
+                            {record.path}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="p-4 text-sm text-slate-400">
+                  {loadedFromCache
+                    ? "This result came from cache, so there is no issue report attached. Use Rescan for a fresh full scan."
+                    : "No scan issues were recorded."}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

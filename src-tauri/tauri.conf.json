@@ -7,7 +7,7 @@
   },
   "package": {
     "productName": "DuckDisk",
-    "version": "0.5.1"
+    "version": "0.5.2"
   },
   "tauri": {
     "allowlist": {

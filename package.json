@@ -1,7 +1,7 @@
 {
   "name": "duckdisk-tauri",
   "private": true,
-  "version": "0.5.1",
+  "version": "0.5.2",
   "author": "Qi Yang <qiyang577@gmail.com>",
   "license": "AGPL-3.0-or-later",
   "repository": {

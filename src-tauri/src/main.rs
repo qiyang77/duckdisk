@@ -41,7 +41,9 @@ fn main() {
             start_scanning,
             stop_scanning,
             read_scan_result,
+            read_scan_error_report,
             read_cached_scan_result,
+            has_cached_scan_index,
             clear_cached_scan_result,
             open_full_disk_access_settings,
             show_in_folder
@@ -92,8 +94,9 @@ fn start_scanning(
     state: tauri::State<'_, MyState>,
     path: String,
     ratio: String,
+    use_cache: bool,
 ) -> Result<(), ()> {
-    scan::start(app_handle, state, path, ratio)
+    scan::start(app_handle, state, path, ratio, use_cache)
 }
 
 #[tauri::command]
@@ -117,12 +120,26 @@ fn read_scan_result(
 }
 
 #[tauri::command]
+fn read_scan_error_report(path: String) -> Result<String, String> {
+    scan::read_error_report(path)
+}
+
+#[tauri::command]
 fn read_cached_scan_result(
     app_handle: tauri::AppHandle,
     scan_path: String,
     ratio: String,
 ) -> Result<Option<String>, String> {
     scan::read_cached_result(app_handle, scan_path, ratio)
+}
+
+#[tauri::command]
+fn has_cached_scan_index(
+    app_handle: tauri::AppHandle,
+    scan_path: String,
+    ratio: String,
+) -> Result<bool, String> {
+    scan::has_cached_index(&app_handle, &scan_path, &ratio)
 }
 
 #[tauri::command]

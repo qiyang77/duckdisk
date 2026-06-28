@@ -1,6 +1,6 @@
 [package]
 name = "duckdisk-tauri"
-version = "0.5.1"
+version = "0.5.2"
 description = "A Tauri App"
 authors = ["Qi Yang <qiyang577@gmail.com>"]
 license = "AGPL-3.0-or-later"
