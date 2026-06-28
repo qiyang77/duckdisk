@@ -1,0 +1,36 @@
+[package]
+name = "duckdisk-tauri"
+version = "0.5.1"
+description = "A Tauri App"
+authors = ["Qi Yang <qiyang577@gmail.com>"]
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/qiyang77/duckdisk"
+edition = "2021"
+rust-version = "1.57"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[build-dependencies]
+tauri-build = { version = "1.2", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+regex = "1"
+tauri = { version = "1.2", features = ["api-all", "macos-private-api", "process-command-api"] }
+sysinfo = "0.27.7"
+window-vibrancy = "0.3.2"
+window-shadows = { git = "https://github.com/adileo/window-shadows" }
+raw-window-handle = "0.5.0"
+
+[target."cfg(target_os = \"macos\")".dependencies]
+cocoa = "0.24"
+objc = "0.2"
+
+[features]
+# by default Tauri runs in production mode
+# when `tauri dev` runs it is executed with `cargo run --no-default-features` if `devPath` is an URL
+default = ["custom-protocol"]
+# this feature is used used for production builds where `devPath` points to the filesystem
+# DO NOT remove this
+custom-protocol = ["tauri/custom-protocol"]

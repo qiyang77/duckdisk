@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  height: 100%;
+  background: transparent;
+}
+body {
+  background: #0a1125af;
+
+  height: 100%;
+  -webkit-user-select: none;
+}
+
+.titlebar {
+  -webkit-app-region: drag;
+}
+.titlebar .navi {
+  -webkit-app-region: no-drag;
+}
+.titlebar button {
+  -webkit-app-region: no-drag;
+}
+
+#root {
+  height: 100%;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+}
+
+::-webkit-scrollbar-thumb:vertical {
+  margin: 5px;
+  background-color: #999;
+  -webkit-border-radius: 5px;
+}
+
+::-webkit-scrollbar-button:start:decrement,
+::-webkit-scrollbar-button:end:increment {
+  height: 5px;
+  display: block;
+}
+
+.HW_badge_cont {
+  width: 24px !important;
+  height: 20px !important;
+}
+
+.progress-shimmer {
+  background-image: linear-gradient(
+    110deg,
+    rgba(37, 99, 235, 0.45) 0%,
+    rgba(96, 165, 250, 0.95) 45%,
+    rgba(37, 99, 235, 0.45) 90%
+  );
+  background-size: 200% 100%;
+  animation: progress-shimmer 1.4s linear infinite;
+}
+
+.duck-scan-stage {
+  position: relative;
+  width: 260px;
+  height: 112px;
+}
+
+.duck-scan-disks {
+  position: absolute;
+  left: 28px;
+  right: 28px;
+  bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+.duck-scan-disk {
+  width: 48px;
+  height: 48px;
+  opacity: 0.85;
+  filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.28));
+}
+
+.duck-scan-duck {
+  position: absolute;
+  left: 6px;
+  bottom: 42px;
+  width: 52px;
+  height: 52px;
+  filter: drop-shadow(0 12px 14px rgba(0, 0, 0, 0.35));
+  animation: duck-hop 1.8s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+@keyframes progress-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+@keyframes duck-hop {
+  0% {
+    transform: translate(0, 0) rotate(-6deg);
+  }
+  16% {
+    transform: translate(34px, -34px) rotate(7deg);
+  }
+  32% {
+    transform: translate(68px, 0) rotate(-5deg);
+  }
+  49% {
+    transform: translate(103px, -34px) rotate(7deg);
+  }
+  65% {
+    transform: translate(137px, 0) rotate(-5deg);
+  }
+  82% {
+    transform: translate(171px, -34px) rotate(7deg);
+  }
+  100% {
+    transform: translate(204px, 0) rotate(-6deg);
+  }
+}
