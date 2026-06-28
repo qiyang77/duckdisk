@@ -1,6 +1,12 @@
 # DuckDisk
 
-DuckDisk is a macOS disk usage analyzer by Qi Yang, inspired by WizTree-style workflows. It scans disks and folders, shows where space is going in dense tables, and lets you quickly reveal or delete large files from one place.
+[![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
+[![release](https://img.shields.io/github/v/release/qiyang77/duckdisk?label=release)](https://github.com/qiyang77/duckdisk/releases)
+![platform](https://img.shields.io/badge/platform-macOS-black)
+![arch](https://img.shields.io/badge/arch-arm64-lightgrey)
+![stack](https://img.shields.io/badge/stack-Tauri%20%7C%20Rust%20%7C%20React-orange)
+
+**DuckDisk** is a macOS disk usage analyzer inspired by **WizTree-style** workflows. It scans disks and folders, shows where space is going in dense tables, and lets you quickly reveal or delete large files from one place.
 
 The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
@@ -20,8 +26,8 @@ The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
 ## Features
 
-- Dense tree view with folder/file counts, sizes, allocated size, and parent percentage.
-- Drag-to-delete function.
+- **Dense tree view** with folder/file counts, sizes, allocated size, and parent percentage.
+- **Drag-to-delete** function.
 - File type summary with extension totals and percentages.
 - Finder integration for revealing files and folders.
 
