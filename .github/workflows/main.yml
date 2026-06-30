@@ -60,10 +60,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          install_notes_file="$(mktemp)"
+          cat > "$install_notes_file" <<'NOTES'
+          Installation: Download the .dmg, open it, and drag DuckDisk into Applications.
+
+          Local development builds are ad-hoc signed. On first launch, macOS may require right-clicking the app and choosing Open. For some new version of MacOS this may not work, then execute xattr -dr com.apple.quarantine /Applications/DuckDisk.app
+          NOTES
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            release_notes_file="$(mktemp)"
+            {
+              echo "DuckDisk macOS arm64 build."
+              echo
+              cat "$install_notes_file"
+            } > "$release_notes_file"
             gh release create "$GITHUB_REF_NAME" \
               --title "DuckDisk $GITHUB_REF_NAME" \
-              --notes "DuckDisk macOS arm64 build."
+              --notes-file "$release_notes_file"
+          elif ! gh release view "$GITHUB_REF_NAME" --json body --jq .body | grep -Fq "Installation: Download the .dmg"; then
+            release_notes_file="$(mktemp)"
+            gh release view "$GITHUB_REF_NAME" --json body --jq .body > "$release_notes_file"
+            {
+              echo
+              cat "$install_notes_file"
+            } >> "$release_notes_file"
+            gh release edit "$GITHUB_REF_NAME" --notes-file "$release_notes_file"
           fi
           gh release upload "$GITHUB_REF_NAME" "$DMG_PATH" --clobber
 
