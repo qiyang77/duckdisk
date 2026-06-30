@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DuckDisk - WizTree-like disk space analyzer for macOS</title>
+    <meta
+      name="description"
+      content="DuckDisk is a fast macOS disk space analyzer inspired by WizTree. Scan folders, inspect file types, find large files, and clean disk usage from a dense table view."
+    >
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://qiyang77.github.io/duckdisk/">
+    <meta property="og:title" content="DuckDisk - WizTree-like disk space analyzer for macOS">
+    <meta
+      property="og:description"
+      content="A macOS disk usage visualizer for finding large folders and files quickly."
+    >
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://qiyang77.github.io/duckdisk/">
+    <meta property="og:image" content="https://qiyang77.github.io/duckdisk/screenshots/scan-results.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "DuckDisk",
+        "applicationCategory": "UtilitiesApplication",
+        "operatingSystem": "macOS",
+        "softwareVersion": "0.5.2",
+        "description": "DuckDisk is a WizTree-like disk space analyzer for macOS.",
+        "url": "https://qiyang77.github.io/duckdisk/",
+        "downloadUrl": "https://github.com/qiyang77/duckdisk/releases/latest",
+        "codeRepository": "https://github.com/qiyang77/duckdisk",
+        "license": "https://github.com/qiyang77/duckdisk/blob/main/LICENSE"
+      }
+    </script>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #09111f;
+        --panel: #111c2d;
+        --panel-strong: #17253a;
+        --text: #f5f7fb;
+        --muted: #a8b4c6;
+        --line: #27374f;
+        --cyan: #32b8f0;
+        --yellow: #f4b741;
+        --green: #55d083;
+        --red: #ff647c;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.5;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .topbar {
+        border-bottom: 1px solid var(--line);
+        background: #0c1627;
+      }
+
+      .nav {
+        align-items: center;
+        display: flex;
+        gap: 16px;
+        justify-content: space-between;
+        margin: 0 auto;
+        max-width: 1160px;
+        padding: 14px 22px;
+      }
+
+      .brand {
+        align-items: center;
+        display: flex;
+        gap: 10px;
+        font-weight: 760;
+      }
+
+      .brand-mark {
+        align-items: center;
+        background: #f7f0d8;
+        border-radius: 8px;
+        color: #0b1322;
+        display: inline-flex;
+        font-size: 18px;
+        height: 34px;
+        justify-content: center;
+        width: 34px;
+      }
+
+      .nav-links {
+        align-items: center;
+        display: flex;
+        gap: 10px;
+        white-space: nowrap;
+      }
+
+      .nav-links a {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--muted);
+        font-size: 14px;
+        padding: 7px 10px;
+        text-decoration: none;
+      }
+
+      .nav-links a.primary {
+        background: var(--cyan);
+        border-color: var(--cyan);
+        color: #06101b;
+        font-weight: 760;
+      }
+
+      .hero {
+        margin: 0 auto;
+        max-width: 1160px;
+        padding: 58px 22px 38px;
+      }
+
+      .hero-grid {
+        align-items: center;
+        display: grid;
+        gap: 30px;
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      }
+
+      .eyebrow {
+        color: var(--cyan);
+        font-size: 13px;
+        font-weight: 760;
+        letter-spacing: 0;
+        margin: 0 0 12px;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        font-size: clamp(44px, 7vw, 84px);
+        letter-spacing: 0;
+        line-height: 0.94;
+        margin: 0;
+      }
+
+      .lead {
+        color: var(--muted);
+        font-size: 20px;
+        margin: 22px 0 0;
+        max-width: 630px;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 28px;
+      }
+
+      .button {
+        align-items: center;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        display: inline-flex;
+        font-weight: 760;
+        justify-content: center;
+        min-height: 44px;
+        padding: 10px 15px;
+        text-decoration: none;
+      }
+
+      .button.download {
+        background: var(--cyan);
+        border-color: var(--cyan);
+        color: #06101b;
+      }
+
+      .button.secondary {
+        background: #101b2c;
+        color: var(--text);
+      }
+
+      .meta {
+        color: var(--muted);
+        display: flex;
+        flex-wrap: wrap;
+        font-size: 13px;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .meta span {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 5px 9px;
+      }
+
+      .hero-shot {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 26px 80px rgb(0 0 0 / 34%);
+      }
+
+      .hero-shot img {
+        display: block;
+        height: auto;
+        width: 100%;
+      }
+
+      .section {
+        border-top: 1px solid var(--line);
+      }
+
+      .inner {
+        margin: 0 auto;
+        max-width: 1160px;
+        padding: 42px 22px;
+      }
+
+      h2 {
+        font-size: 28px;
+        letter-spacing: 0;
+        margin: 0 0 18px;
+      }
+
+      .feature-grid {
+        display: grid;
+        gap: 14px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .feature {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+      }
+
+      .feature strong {
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .feature p {
+        color: var(--muted);
+        margin: 0;
+      }
+
+      .screens {
+        display: grid;
+        gap: 18px;
+      }
+
+      .screen {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .screen img {
+        display: block;
+        height: auto;
+        width: 100%;
+      }
+
+      .screen-caption {
+        align-items: center;
+        background: var(--panel-strong);
+        border-top: 1px solid var(--line);
+        display: flex;
+        justify-content: space-between;
+        padding: 12px 14px;
+      }
+
+      .screen-caption span {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .two-col {
+        display: grid;
+        gap: 22px;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 20px;
+      }
+
+      .panel p {
+        color: var(--muted);
+        margin: 0 0 12px;
+      }
+
+      .panel p:last-child {
+        margin-bottom: 0;
+      }
+
+      .footer {
+        color: var(--muted);
+        font-size: 14px;
+        padding-bottom: 34px;
+      }
+
+      @media (max-width: 840px) {
+        .hero-grid,
+        .feature-grid,
+        .two-col {
+          grid-template-columns: 1fr;
+        }
+
+        .nav {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .nav-links {
+          flex-wrap: wrap;
+        }
+
+        .hero {
+          padding-top: 38px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <nav class="nav" aria-label="Primary">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">D</span>
+          <span>DuckDisk</span>
+        </div>
+        <div class="nav-links">
+          <a href="https://github.com/qiyang77/duckdisk">GitHub</a>
+          <a href="https://github.com/qiyang77/duckdisk/releases/latest" class="primary">Download</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-grid">
+          <div>
+            <p class="eyebrow">WizTree-style disk analyzer for Mac</p>
+            <h1>DuckDisk</h1>
+            <p class="lead">
+              A fast macOS disk space analyzer for finding large folders, inspecting file types,
+              and cleaning up local storage from a dense table-first interface.
+            </p>
+            <div class="actions">
+              <a class="button download" href="https://github.com/qiyang77/duckdisk/releases/latest">Download for macOS</a>
+              <a class="button secondary" href="https://github.com/qiyang77/duckdisk">View Source</a>
+            </div>
+            <div class="meta" aria-label="Project facts">
+              <span>macOS</span>
+              <span>Apple Silicon arm64</span>
+              <span>Tauri + Rust + React</span>
+              <span>AGPL-3.0-or-later</span>
+            </div>
+          </div>
+          <figure class="hero-shot">
+            <img
+              src="screenshots/scan-results.png"
+              width="1521"
+              height="733"
+              alt="DuckDisk scan results showing folder sizes, file counts, file type totals, and a treemap"
+            >
+          </figure>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="inner">
+          <h2>Built for repeated cleanup work</h2>
+          <div class="feature-grid">
+            <div class="feature">
+              <strong>Dense tree view</strong>
+              <p>Sort folders and files by size, allocated size, item count, and parent percentage.</p>
+            </div>
+            <div class="feature">
+              <strong>File type summary</strong>
+              <p>See extension totals and percentages beside the directory table.</p>
+            </div>
+            <div class="feature">
+              <strong>Finder integration</strong>
+              <p>Reveal files and folders quickly before deciding what to remove.</p>
+            </div>
+            <div class="feature">
+              <strong>Drag-to-delete</strong>
+              <p>Collect cleanup targets in one delete zone and remove them deliberately.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="inner screens">
+          <h2>Screenshots</h2>
+          <figure class="screen">
+            <img
+              src="screenshots/disk-list.png"
+              width="1100"
+              height="545"
+              alt="DuckDisk start screen showing available disks and Full Disk Access button"
+            >
+            <figcaption class="screen-caption">
+              <strong>Disk list</strong>
+              <span>Select a volume or grant Full Disk Access for full scans.</span>
+            </figcaption>
+          </figure>
+          <figure class="screen">
+            <img
+              src="screenshots/scan-progress.png"
+              width="1100"
+              height="600"
+              alt="DuckDisk scan progress screen with file and gigabyte counters"
+            >
+            <figcaption class="screen-caption">
+              <strong>Scan progress</strong>
+              <span>Track scanned files and size while DuckDisk walks the filesystem.</span>
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="inner two-col">
+          <div class="panel">
+            <h2>Install</h2>
+            <p>Download the latest DMG release, open it, and drag DuckDisk into Applications.</p>
+            <p>For full-disk scans, grant DuckDisk Full Disk Access in macOS Privacy &amp; Security settings.</p>
+            <p><a href="https://github.com/qiyang77/duckdisk/releases/latest">Open latest release</a></p>
+          </div>
+          <div class="panel">
+            <h2>Keywords</h2>
+            <p>
+              DuckDisk is a disk usage visualizer, macOS disk space analyzer, and WizTree alternative
+              for Mac users who want fast local cleanup.
+            </p>
+            <p><a href="https://github.com/qiyang77/duckdisk">Read the README on GitHub</a></p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="inner footer">
+      DuckDisk is open source software by Qi Yang. Inspired by WizTree-style disk analysis workflows.
+    </footer>
+  </body>
+</html>
