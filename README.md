@@ -68,12 +68,6 @@ The macOS installer is generated under:
 src-tauri/target/release/bundle/dmg/
 ```
 
-For this project, final release DMGs are renamed with `arm64` rather than Tauri's default `aarch64` suffix.
-
-## Notes
-
-DuckDisk is focused on local macOS disk analysis. It does not currently implement true incremental rescanning; cached results are reused until `Rescan` is requested or a delete operation clears the cache.
-
 ## Acknowledgements
 
-Thanks to the original SquirrelDisk author and contributors for the foundation this project builds on.
+We thank SquirrelDisk (https://github.com/adileo/squirreldisk), whose work this project refers to.
