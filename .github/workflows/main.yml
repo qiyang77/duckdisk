@@ -38,6 +38,8 @@ jobs:
         run: npm run build
 
       - name: Build app
+        env:
+          DUCKDISK_ONEDRIVE_CLIENT_ID: ${{ vars.ONEDRIVE_CLIENT_ID }}
         run: npm run tauri build
 
       - name: Rename DMG to arm64

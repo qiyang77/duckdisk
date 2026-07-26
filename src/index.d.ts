@@ -4,6 +4,8 @@ declare module "shade-blend-color";
 interface DiskItem {
   id: string;
   name: string;
+  displayName?: string;
+  cloudId?: string;
   value: number;
   size: number;
   isDirectory: boolean;

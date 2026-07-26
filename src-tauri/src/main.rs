@@ -1,3 +1,4 @@
+mod onedrive;
 mod scan;
 mod window_style;
 
@@ -45,6 +46,11 @@ fn main() {
             read_cached_scan_result,
             has_cached_scan_index,
             clear_cached_scan_result,
+            get_onedrive_state,
+            connect_onedrive_account,
+            disconnect_onedrive_account,
+            start_onedrive_scan,
+            read_onedrive_scan_result,
             open_full_disk_access_settings,
             show_in_folder
         ])
@@ -149,4 +155,38 @@ fn clear_cached_scan_result(
     ratio: String,
 ) -> Result<(), String> {
     scan::clear_cached_result(app_handle, scan_path, ratio)
+}
+
+#[tauri::command]
+fn get_onedrive_state(app_handle: tauri::AppHandle) -> Result<onedrive::OneDriveState, String> {
+    onedrive::get_state(&app_handle)
+}
+
+#[tauri::command]
+async fn connect_onedrive_account(
+    app_handle: tauri::AppHandle,
+) -> Result<onedrive::OneDriveAccount, String> {
+    onedrive::connect_account(&app_handle).await
+}
+
+#[tauri::command]
+fn disconnect_onedrive_account(
+    app_handle: tauri::AppHandle,
+    account_id: String,
+) -> Result<(), String> {
+    onedrive::disconnect_account(&app_handle, &account_id)
+}
+
+#[tauri::command]
+fn start_onedrive_scan(
+    app_handle: tauri::AppHandle,
+    account_id: String,
+    force_full: bool,
+) -> Result<(), String> {
+    onedrive::start_scan(app_handle, account_id, force_full)
+}
+
+#[tauri::command]
+fn read_onedrive_scan_result(path: String) -> Result<String, String> {
+    onedrive::read_scan_result(&path)
 }

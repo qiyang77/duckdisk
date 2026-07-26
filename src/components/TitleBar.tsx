@@ -86,7 +86,9 @@ const TitleBar = () => {
                     />
                   </svg>
                   <span className="ml-1 text-sm font-medium md:ml-2 text-gray-500">
-                    {state.isDirectory ? "Folder" : "Disk"} ({state.disk})
+                    {state.source === "onedrive"
+                      ? state.disk
+                      : `${state.isDirectory ? "Folder" : "Disk"} (${state.disk})`}
                   </span>
                 </div>
               </li>

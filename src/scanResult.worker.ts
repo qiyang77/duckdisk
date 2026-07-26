@@ -1,10 +1,10 @@
 const mapScanTree = (obj: any, parent: any = null): DiskItem => {
   if (obj.name === "(total)") {
     obj.id = "/";
-    obj.name = "/";
+    obj.name = obj.displayName || "/";
   } else if (parent && parent.id === "/") {
-    obj.id = obj.name;
-    obj.name = obj.name.substring(1);
+    obj.id = obj.name.startsWith("/") ? obj.name : `/${obj.name}`;
+    obj.name = obj.name.replace(/^\/+/, "");
   } else {
     obj.id = parent ? parent.id + "/" + obj.name : obj.name;
   }

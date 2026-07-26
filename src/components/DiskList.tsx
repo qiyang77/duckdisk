@@ -8,6 +8,45 @@ import { open } from "@tauri-apps/api/dialog";
 import folderIcon from "../assets/folder.png";
 import { useNavigate } from "react-router-dom";
 
+type OneDriveAccount = {
+  id: string;
+  name: string;
+  driveType: string;
+  totalSpace: number;
+  usedSpace: number;
+  availableSpace: number;
+};
+
+type OneDriveState = {
+  configured: boolean;
+  accounts: OneDriveAccount[];
+};
+
+const formatBytes = (bytes: number) => {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  const index = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1000)),
+    units.length - 1
+  );
+  return `${(bytes / Math.pow(1000, index)).toFixed(index ? 1 : 0)} ${
+    units[index]
+  }`;
+};
+
+const CloudIcon = () => (
+  <svg viewBox="0 0 64 64" aria-hidden="true" className="h-14 w-14">
+    <path
+      d="M22 48h28a11 11 0 0 0 1-21.9A17 17 0 0 0 19.3 21 13.5 13.5 0 0 0 22 48Z"
+      fill="#38bdf8"
+    />
+    <path
+      d="M8 48h30a10 10 0 0 0 0-20h-1.2A15 15 0 0 0 8.4 31.6 8.5 8.5 0 0 0 8 48Z"
+      fill="#0284c7"
+    />
+  </svg>
+);
+
 declare global {
   interface Window {
     electron: any;
@@ -20,6 +59,12 @@ declare global {
 const DiskList = () => {
   const [disks, setDisks] = useState([]);
   const [appVersion, setAppVersion] = useState("1.0.0");
+  const [oneDrive, setOneDrive] = useState<OneDriveState>({
+    configured: false,
+    accounts: [],
+  });
+  const [cloudBusy, setCloudBusy] = useState<string | null>(null);
+  const [cloudError, setCloudError] = useState<string | null>(null);
   const navigate = useNavigate();
   useEffect(() => {
     getVersion().then((v) => setAppVersion(v));
@@ -42,6 +87,41 @@ const DiskList = () => {
       clearInterval(handle);
     };
   }, []);
+
+  const syncOneDrive = async () => {
+    const state = await invoke<OneDriveState>("get_onedrive_state");
+    setOneDrive(state);
+  };
+
+  useEffect(() => {
+    syncOneDrive().catch((error) => setCloudError(String(error)));
+  }, []);
+
+  const connectOneDrive = async () => {
+    setCloudBusy("connect");
+    setCloudError(null);
+    try {
+      await invoke("connect_onedrive_account");
+      await syncOneDrive();
+    } catch (error) {
+      setCloudError(String(error));
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const disconnectOneDrive = async (account: OneDriveAccount) => {
+    setCloudBusy(account.id);
+    setCloudError(null);
+    try {
+      await invoke("disconnect_onedrive_account", { accountId: account.id });
+      await syncOneDrive();
+    } catch (error) {
+      setCloudError(String(error));
+    } finally {
+      setCloudBusy(null);
+    }
+  };
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -81,6 +161,96 @@ const DiskList = () => {
             </div>
           </div>
         </div>
+        <section className="border-t border-slate-700/70 bg-slate-950/30">
+          <div className="flex items-center justify-between px-4 py-3">
+            <div>
+              <div className="text-xs font-semibold uppercase text-slate-400">
+                Cloud Storage
+              </div>
+              <div className="mt-0.5 text-xs text-slate-500">
+                Scan cloud metadata without downloading file contents
+              </div>
+            </div>
+            <button
+              onClick={connectOneDrive}
+              disabled={!oneDrive.configured || cloudBusy !== null}
+              className="rounded border border-sky-500/70 px-3 py-1.5 text-xs font-medium text-sky-100 hover:bg-sky-500/15 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {cloudBusy === "connect" ? "Waiting for Microsoft..." : "Connect OneDrive"}
+            </button>
+          </div>
+          {!oneDrive.configured && (
+            <div className="border-t border-amber-900/50 bg-amber-950/20 px-4 py-2 text-xs text-amber-200">
+              OneDrive sign-in is not configured in this build.
+            </div>
+          )}
+          {cloudError && (
+            <div className="border-t border-red-900/50 bg-red-950/20 px-4 py-2 text-xs text-red-300">
+              {cloudError}
+            </div>
+          )}
+          {oneDrive.accounts.map((account) => {
+            const percent =
+              account.totalSpace > 0
+                ? Math.min(100, (account.usedSpace / account.totalSpace) * 100)
+                : 0;
+            return (
+              <div
+                key={account.id}
+                onClick={() =>
+                  navigate("/disk", {
+                    state: {
+                      source: "onedrive",
+                      accountId: account.id,
+                      disk: `OneDrive - ${account.name}`,
+                      used: account.usedSpace,
+                    },
+                  })
+                }
+                className="flex cursor-pointer items-center gap-4 border-t border-slate-800 px-4 py-3 hover:bg-slate-800"
+              >
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center">
+                  <CloudIcon />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-white">
+                        OneDrive - {account.name}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-400">
+                        {formatBytes(account.usedSpace)} of{" "}
+                        {formatBytes(account.totalSpace)} used
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right text-xs text-slate-300">
+                      {percent.toFixed(0)}%
+                      <div className="mt-0.5 text-slate-500">
+                        {formatBytes(account.availableSpace)} free
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-700">
+                    <div
+                      className="h-full rounded-full bg-sky-500"
+                      style={{ width: `${percent}%` }}
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    disconnectOneDrive(account);
+                  }}
+                  disabled={cloudBusy !== null}
+                  className="shrink-0 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-red-500/70 hover:text-red-300 disabled:opacity-40"
+                >
+                  {cloudBusy === account.id ? "Disconnecting..." : "Disconnect"}
+                </button>
+              </div>
+            );
+          })}
+        </section>
       </div>
       <div className="border-t border-slate-700/60 bg-slate-950/60 p-3 text-white w-full flex items-center justify-end gap-4">
         <div className="flex shrink-0 items-center gap-3">

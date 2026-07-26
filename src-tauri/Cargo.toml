@@ -22,10 +22,15 @@ sysinfo = "0.27.7"
 window-vibrancy = "0.3.2"
 window-shadows = { git = "https://github.com/adileo/window-shadows" }
 raw-window-handle = "0.5.0"
+oauth2 = { version = "4.4.2", default-features = false, features = ["reqwest", "rustls-tls"] }
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["time"] }
+url = "2"
 
 [target."cfg(target_os = \"macos\")".dependencies]
 cocoa = "0.24"
 objc = "0.2"
+keyring = { version = "2.3.3", default-features = false, features = ["platform-macos"] }
 
 [features]
 # by default Tauri runs in production mode

@@ -43,6 +43,8 @@ type RouteState = {
   disk: string;
   used?: number;
   fullscan?: boolean;
+  source?: "local" | "onedrive";
+  accountId?: string;
 };
 
 type VisibleRow = {
@@ -395,7 +397,13 @@ const ScanningDuck = () => (
 
 const Scanning = () => {
   const location = useLocation() as { state?: RouteState };
-  const { disk = "/", used = 0 } = location.state || {};
+  const {
+    disk = "/",
+    used = 0,
+    source = "local",
+    accountId = "",
+  } = location.state || {};
+  const isCloud = source === "onedrive";
   const ratio = "0";
 
   const worker = useRef<Worker | null>(null);
@@ -439,7 +447,13 @@ const Scanning = () => {
     });
 
     const unlistenIncremental = listen("scan_incremental", () => {
+      setLoadedFromCache(true);
       setScanPhase("incremental");
+    });
+
+    const unlistenFull = listen("scan_full", () => {
+      setLoadedFromCache(false);
+      setScanPhase("scanning");
     });
 
     const unlistenFailed = listen("scan_failed", (event: any) => {
@@ -451,7 +465,7 @@ const Scanning = () => {
       try {
         setScanPhase("preparing");
         const payload = event.payload as { path: string; errorsPath: string };
-        if (payload.errorsPath) {
+        if (!isCloud && payload.errorsPath) {
           const errorReport = await invoke<string>("read_scan_error_report", {
             path: payload.errorsPath,
           });
@@ -459,11 +473,15 @@ const Scanning = () => {
         } else {
           setScanIssueReport(emptyScanErrorReport);
         }
-        const scanResult = await invoke<string>("read_scan_result", {
-          path: payload.path,
-          scanPath: disk,
-          ratio,
-        });
+        const scanResult = isCloud
+          ? await invoke<string>("read_onedrive_scan_result", {
+              path: payload.path,
+            })
+          : await invoke<string>("read_scan_result", {
+              path: payload.path,
+              scanPath: disk,
+              ratio,
+            });
         worker.current?.postMessage(scanResult);
       } catch (error) {
         setScanError(error instanceof Error ? error.message : String(error));
@@ -506,6 +524,25 @@ const Scanning = () => {
       setDeleteList([]);
       setDeletedIds(new Set());
       setScanPhase(scanNonce === 0 ? "checkingCache" : "scanning");
+
+      if (isCloud) {
+        if (!accountId) {
+          setScanError("OneDrive account information is missing");
+          setScanPhase("failed");
+          return;
+        }
+        setLoadedFromCache(false);
+        setScanPhase(scanNonce === 0 ? "checkingCache" : "scanning");
+        scanningStarted = true;
+        invoke("start_onedrive_scan", {
+          accountId,
+          forceFull: scanNonce > 0,
+        }).catch((error) => {
+          setScanError(String(error));
+          setScanPhase("failed");
+        });
+        return;
+      }
 
       if (scanNonce === 0) {
         try {
@@ -551,14 +588,15 @@ const Scanning = () => {
       unlistenStatus.then((dispose) => dispose());
       unlistenFinalizing.then((dispose) => dispose());
       unlistenIncremental.then((dispose) => dispose());
+      unlistenFull.then((dispose) => dispose());
       unlistenFailed.then((dispose) => dispose());
       unlistenCompleted.then((dispose) => dispose());
       worker.current?.terminate();
-      if (scanningStarted) {
+      if (scanningStarted && !isCloud) {
         invoke("stop_scanning", { path: disk });
       }
     };
-  }, [disk, ratio, scanNonce]);
+  }, [accountId, disk, isCloud, ratio, scanNonce]);
 
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
@@ -650,7 +688,7 @@ const Scanning = () => {
   const scannedTotal = status?.total || 0;
   const issueCount = totalScanIssues(scanIssueReport.counts);
   const canOpenScanIssues =
-    issueCount > 0 || loadedFromCache;
+    !isCloud && (issueCount > 0 || loadedFromCache);
   const scanPercent =
     used > 0 ? Math.min(100, (Math.min(scannedTotal, used) / used) * 100) : 0;
   const topBlocks = childRows
@@ -658,6 +696,9 @@ const Scanning = () => {
     .slice(0, 20);
 
   const reveal = (node: DiskItem) => {
+    if (isCloud) {
+      return;
+    }
     invoke("show_in_folder", { path: node.id }).catch(console.error);
   };
 
@@ -674,7 +715,7 @@ const Scanning = () => {
   };
 
   const startRescan = async () => {
-    if (loadedFromCache) {
+    if (!isCloud && loadedFromCache) {
       await invoke("clear_cached_scan_result", { scanPath: disk, ratio }).catch(
         console.error
       );
@@ -706,7 +747,7 @@ const Scanning = () => {
     node: DiskItem,
     deleted: boolean
   ) => {
-    if (event.button !== 0 || node.id === "/" || deleted) {
+    if (isCloud || event.button !== 0 || node.id === "/" || deleted) {
       return;
     }
 
@@ -721,7 +762,7 @@ const Scanning = () => {
   };
 
   const deleteSelected = async () => {
-    if (!deleteList.length) {
+    if (isCloud || !deleteList.length) {
       return;
     }
 
@@ -788,9 +829,13 @@ const Scanning = () => {
           ) : (
             <div className="mb-3 mt-1 text-center text-sm text-slate-400">
               {status
-                ? `${status.items.toLocaleString()} files - ${formatBytes(
-                    status.total
-                  )}${used > 0 ? ` - ${scanPercent.toFixed(1)}%` : ""}${
+                ? isCloud
+                  ? `${status.items.toLocaleString()} cloud items received${
+                      status.total ? ` - ${formatBytes(status.total)}` : ""
+                    }`
+                  : `${status.items.toLocaleString()} files - ${formatBytes(
+                      status.total
+                    )}${used > 0 ? ` - ${scanPercent.toFixed(1)}%` : ""}${
                     totalScanIssues(status) ? ` - ${formatScanIssueCounts(status)}` : ""
                   }`
                 : "Waiting for scan progress"}
@@ -799,7 +844,11 @@ const Scanning = () => {
           <div className="h-3 w-full overflow-hidden rounded-full bg-slate-800">
             <div
               className="h-3 rounded-full bg-sky-500 progress-shimmer"
-              style={{ width: `${status && used > 0 ? scanPercent : 100}%` }}
+              style={{
+                width: `${
+                  !isCloud && status && used > 0 ? scanPercent : 100
+                }%`,
+              }}
             />
           </div>
         </div>
@@ -826,7 +875,7 @@ const Scanning = () => {
             <span className="truncate">{currentNode?.id || disk}</span>
             {loadedFromCache && (
               <span className="rounded border border-emerald-700/60 px-2 py-0.5 text-emerald-300">
-                Cached
+                {isCloud ? "Delta updated" : "Cached"}
               </span>
             )}
           </div>
@@ -864,26 +913,30 @@ const Scanning = () => {
           </div>
         </div>
         <div className="flex items-start gap-2">
-          <button
-            onClick={() => setShowScanIssues(true)}
-            disabled={!canOpenScanIssues}
-            className="rounded border border-slate-700 px-3 py-2 text-xs font-medium text-slate-100 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Scan Issues
-            {issueCount ? ` ${issueCount}` : ""}
-          </button>
+          {!isCloud && (
+            <button
+              onClick={() => setShowScanIssues(true)}
+              disabled={!canOpenScanIssues}
+              className="rounded border border-slate-700 px-3 py-2 text-xs font-medium text-slate-100 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Scan Issues
+              {issueCount ? ` ${issueCount}` : ""}
+            </button>
+          )}
           <button
             onClick={startRescan}
             className="rounded border border-slate-700 px-3 py-2 text-xs font-medium text-slate-100 hover:bg-slate-800"
           >
-            {loadedFromCache ? "Clean Cache & Rescan" : "Rescan"}
+            {isCloud || loadedFromCache ? "Clean Cache & Rescan" : "Rescan"}
           </button>
-          <button
-            onClick={() => currentNode && reveal(currentNode)}
-            className="rounded border border-slate-700 px-3 py-2 text-xs font-medium text-slate-100 hover:bg-slate-800"
-          >
-            Reveal
-          </button>
+          {!isCloud && (
+            <button
+              onClick={() => currentNode && reveal(currentNode)}
+              className="rounded border border-slate-700 px-3 py-2 text-xs font-medium text-slate-100 hover:bg-slate-800"
+            >
+              Reveal
+            </button>
+          )}
         </div>
       </div>
 
@@ -899,7 +952,7 @@ const Scanning = () => {
                   <TableHeader>Name</TableHeader>
                   <TableHeader>Parent %</TableHeader>
                   <TableHeader>Size</TableHeader>
-                  <TableHeader>Allocated</TableHeader>
+                  {!isCloud && <TableHeader>Allocated</TableHeader>}
                   <TableHeader>Items</TableHeader>
                   <TableHeader>Files</TableHeader>
                   <TableHeader>Folders</TableHeader>
@@ -923,9 +976,11 @@ const Scanning = () => {
                     <NumberCell>
                       {formatBytes(statsMap.get(parentNode.id)?.size || 0)}
                     </NumberCell>
-                    <NumberCell>
-                      {formatBytes(statsMap.get(parentNode.id)?.size || 0)}
-                    </NumberCell>
+                    {!isCloud && (
+                      <NumberCell>
+                        {formatBytes(statsMap.get(parentNode.id)?.size || 0)}
+                      </NumberCell>
+                    )}
                     <NumberCell>
                       {(statsMap.get(parentNode.id)?.items || 0).toLocaleString()}
                     </NumberCell>
@@ -967,6 +1022,9 @@ const Scanning = () => {
                       key={node.id || `${node.name}-${index}`}
                       onPointerDown={(event) => startPointerDrag(event, node, deleted)}
                       onContextMenu={(event) => {
+                        if (isCloud) {
+                          return;
+                        }
                         event.preventDefault();
                         reveal(node);
                       }}
@@ -1035,7 +1093,9 @@ const Scanning = () => {
                         <PercentBar percent={percent} />
                       </td>
                       <NumberCell>{formatBytes(stats.size)}</NumberCell>
-                      <NumberCell>{formatBytes(stats.size)}</NumberCell>
+                      {!isCloud && (
+                        <NumberCell>{formatBytes(stats.size)}</NumberCell>
+                      )}
                       <NumberCell>{stats.items.toLocaleString()}</NumberCell>
                       <NumberCell>{stats.files.toLocaleString()}</NumberCell>
                       <NumberCell>{stats.folders.toLocaleString()}</NumberCell>
@@ -1092,7 +1152,13 @@ const Scanning = () => {
         </section>
       </div>
 
-      <div className="grid grid-cols-[minmax(0,1fr)_360px] gap-px border-t border-slate-800 bg-slate-800">
+      <div
+        className={`border-t border-slate-800 bg-slate-800 ${
+          isCloud
+            ? ""
+            : "grid grid-cols-[minmax(0,1fr)_360px] gap-px"
+        }`}
+      >
         <div className="min-w-0 bg-slate-950 px-2 py-2">
           <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
             <span className="truncate">{currentNode?.id || disk}</span>
@@ -1124,12 +1190,13 @@ const Scanning = () => {
             })}
           </div>
         </div>
-        <div
-          ref={dropZoneRef}
-          className={`flex min-w-0 flex-col justify-between bg-slate-950 p-2 transition-colors ${
-            isDeleteTargetActive ? "bg-red-950/40" : ""
-          }`}
-        >
+        {!isCloud && (
+          <div
+            ref={dropZoneRef}
+            className={`flex min-w-0 flex-col justify-between bg-slate-950 p-2 transition-colors ${
+              isDeleteTargetActive ? "bg-red-950/40" : ""
+            }`}
+          >
           <div
             className={`min-h-[42px] rounded border border-dashed px-2 py-1.5 text-center text-xs ${
               isDeleteTargetActive
@@ -1206,7 +1273,8 @@ const Scanning = () => {
                 : "Delete"}
             </button>
           </div>
-        </div>
+          </div>
+        )}
       </div>
       {dragPreview && (
         <div
