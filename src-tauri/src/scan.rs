@@ -87,29 +87,27 @@ pub fn start(
     if use_cache {
         tauri::async_runtime::spawn(async move {
             match incremental_scan(&app_handle, &path, &ratio, &ratio_arg).await {
-                Ok((result_path, error_report)) => {
-                    match write_scan_error_report(&error_report) {
-                        Ok(errors_path) => {
-                            app_handle
-                                .emit_all(
-                                    "scan_completed",
-                                    CompletedPayload {
-                                        path: result_path.display().to_string(),
-                                        errors_path: errors_path.display().to_string(),
-                                    },
-                                )
-                                .ok();
-                        }
-                        Err(err) => {
-                            app_handle
-                                .emit_all(
-                                    "scan_failed",
-                                    format!("Failed to write scan error report: {err}"),
-                                )
-                                .ok();
-                        }
+                Ok((result_path, error_report)) => match write_scan_error_report(&error_report) {
+                    Ok(errors_path) => {
+                        app_handle
+                            .emit_all(
+                                "scan_completed",
+                                CompletedPayload {
+                                    path: result_path.display().to_string(),
+                                    errors_path: errors_path.display().to_string(),
+                                },
+                            )
+                            .ok();
                     }
-                }
+                    Err(err) => {
+                        app_handle
+                            .emit_all(
+                                "scan_failed",
+                                format!("Failed to write scan error report: {err}"),
+                            )
+                            .ok();
+                    }
+                },
                 Err(err) => {
                     app_handle.emit_all("scan_failed", err).ok();
                 }
@@ -125,15 +123,14 @@ pub fn start(
         r"\(scanned ([0-9]+), total ([0-9]+)(?:, linked [0-9]+, shared [0-9]+)?(?:, erred ([0-9]+))?\)",
     )
     .expect("valid progress regex");
-    let error_regex = Regex::new(r#"^\[error\] (\S+) "(.+)": (.+)$"#)
-        .expect("valid error regex");
+    let error_regex = Regex::new(r#"^\[error\] (\S+) "(.+)": (.+)$"#).expect("valid error regex");
 
     let (mut rx, child) = TauriCommand::new_sidecar("pdu")
         .expect("failed to create `my-sidecar` binary command")
         .args(paths_to_scan)
         .spawn()
         .expect("Failed to spawn sidecar");
-    
+
     *state.0.lock().unwrap() = Some(child);
 
     // unlisten to the event using the `id` returned on the `listen_global` function
@@ -173,7 +170,10 @@ pub fn start(
                         },
                         Err(err) => {
                             app_handle
-                                .emit_all("scan_failed", format!("Failed to write scan result: {err}"))
+                                .emit_all(
+                                    "scan_failed",
+                                    format!("Failed to write scan result: {err}"),
+                                )
                                 .ok();
                         }
                     }
@@ -610,7 +610,9 @@ pub fn read_cached_result(
         return Ok(None);
     }
 
-    fs::read_to_string(path).map(Some).map_err(|err| err.to_string())
+    fs::read_to_string(path)
+        .map(Some)
+        .map_err(|err| err.to_string())
 }
 
 pub fn has_cached_index(
@@ -657,7 +659,9 @@ pub fn read_error_report(path: String) -> Result<String, String> {
     let temp_dir = std::env::temp_dir();
 
     if !path.starts_with(&temp_dir) {
-        return Err("Refusing to read scan error report outside the temporary directory".to_string());
+        return Err(
+            "Refusing to read scan error report outside the temporary directory".to_string(),
+        );
     }
 
     let content = fs::read_to_string(&path).map_err(|err| err.to_string())?;

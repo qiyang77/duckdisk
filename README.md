@@ -47,7 +47,7 @@ For accurate full-disk scans, grant DuckDisk Full Disk Access:
 
 If macOS prompts for permissions during a scan, denied or previously blocked reads may count as scan errors. After granting permissions, run `Rescan` for cleaner results.
 
-OneDrive scans use Microsoft account authorization and only request read access. Refresh tokens are stored in macOS Keychain; cached scan metadata is stored in DuckDisk's application cache.
+OneDrive scans use Microsoft account authorization and request `Files.ReadWrite` so selected files and folders can be moved to the OneDrive Recycle Bin. DuckDisk does not permanently delete cloud items. Refresh tokens are stored in macOS Keychain; cached scan metadata is stored in DuckDisk's application cache.
 
 ## Installation
 
@@ -72,7 +72,7 @@ Create a Microsoft Entra app registration for personal Microsoft accounts and wo
 
 1. Configure it as a public mobile/desktop client.
 2. Add `http://localhost` as a redirect URI.
-3. Add delegated Microsoft Graph permission `Files.Read`.
+3. Add delegated Microsoft Graph permission `Files.ReadWrite`.
 4. Do not create or embed a client secret.
 
 Pass its Application (client) ID when running or building DuckDisk:

@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/tauri";
 
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/api/dialog";
+import { open as openExternal } from "@tauri-apps/api/shell";
 import folderIcon from "../assets/folder.png";
 import { useNavigate } from "react-router-dom";
 
@@ -20,6 +21,13 @@ type OneDriveAccount = {
 type OneDriveState = {
   configured: boolean;
   accounts: OneDriveAccount[];
+};
+
+type UpdateCheck = {
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  releaseUrl: string;
 };
 
 const formatBytes = (bytes: number) => {
@@ -65,6 +73,9 @@ const DiskList = () => {
   });
   const [cloudBusy, setCloudBusy] = useState<string | null>(null);
   const [cloudError, setCloudError] = useState<string | null>(null);
+  const [isCheckingUpdates, setCheckingUpdates] = useState(false);
+  const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
   const navigate = useNavigate();
   useEffect(() => {
     getVersion().then((v) => setAppVersion(v));
@@ -120,6 +131,19 @@ const DiskList = () => {
       setCloudError(String(error));
     } finally {
       setCloudBusy(null);
+    }
+  };
+
+  const checkForUpdates = async () => {
+    setCheckingUpdates(true);
+    setUpdateCheck(null);
+    setUpdateError(null);
+    try {
+      setUpdateCheck(await invoke<UpdateCheck>("check_for_updates"));
+    } catch (error) {
+      setUpdateError(String(error));
+    } finally {
+      setCheckingUpdates(false);
     }
   };
 
@@ -254,6 +278,39 @@ const DiskList = () => {
       </div>
       <div className="border-t border-slate-700/60 bg-slate-950/60 p-3 text-white w-full flex items-center justify-end gap-4">
         <div className="flex shrink-0 items-center gap-3">
+          {updateCheck && (
+            <span
+              className={`text-xs ${
+                updateCheck.updateAvailable
+                  ? "text-amber-300"
+                  : "text-emerald-300"
+              }`}
+            >
+              {updateCheck.updateAvailable
+                ? `v ${updateCheck.latestVersion} available`
+                : "DuckDisk is up to date"}
+            </span>
+          )}
+          {updateError && (
+            <span className="max-w-[260px] truncate text-xs text-red-300">
+              {updateError}
+            </span>
+          )}
+          {updateCheck?.updateAvailable && (
+            <button
+              onClick={() => openExternal(updateCheck.releaseUrl)}
+              className="rounded border border-amber-500/70 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-500/15"
+            >
+              View Release
+            </button>
+          )}
+          <button
+            onClick={checkForUpdates}
+            disabled={isCheckingUpdates}
+            className="rounded border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-100 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isCheckingUpdates ? "Checking..." : "Check for Updates"}
+          </button>
           <button
             onClick={() => invoke("open_full_disk_access_settings")}
             className="rounded border border-sky-500/70 px-3 py-1.5 text-xs font-medium text-sky-100 hover:bg-sky-500/15"

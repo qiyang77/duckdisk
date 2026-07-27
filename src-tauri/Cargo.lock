@@ -630,7 +630,7 @@ dependencies = [
 
 [[package]]
 name = "duckdisk-tauri"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "cocoa",
  "keyring",
@@ -639,6 +639,7 @@ dependencies = [
  "raw-window-handle",
  "regex",
  "reqwest",
+ "semver 1.0.16",
  "serde",
  "serde_json",
  "sysinfo",

@@ -60,6 +60,14 @@ type DeleteState = {
   error: string | null;
 };
 
+type OneDriveDeleteResult = {
+  deletedIds: string[];
+  failures: Array<{
+    itemId: string;
+    message: string;
+  }>;
+};
+
 type DragSession = {
   node: DiskItem;
   startX: number;
@@ -489,6 +497,18 @@ const Scanning = () => {
       }
     });
 
+    const unlistenDeleteStatus = listen(
+      "onedrive_delete_status",
+      (event: any) => {
+        const payload = event.payload as { current: number; total: number };
+        setDeleteState((current) => ({
+          ...current,
+          current: payload.current,
+          total: payload.total,
+        }));
+      }
+    );
+
     worker.current = new Worker(
       new URL("../scanResult.worker.ts", import.meta.url),
       { type: "module" }
@@ -591,6 +611,7 @@ const Scanning = () => {
       unlistenFull.then((dispose) => dispose());
       unlistenFailed.then((dispose) => dispose());
       unlistenCompleted.then((dispose) => dispose());
+      unlistenDeleteStatus.then((dispose) => dispose());
       worker.current?.terminate();
       if (scanningStarted && !isCloud) {
         invoke("stop_scanning", { path: disk });
@@ -735,10 +756,17 @@ const Scanning = () => {
       failed: 0,
     }));
     setDeleteList((current) => {
-      if (current.some((item) => item.id === node.id)) {
+      if (
+        current.some(
+          (item) => item.id === node.id || node.id.startsWith(`${item.id}/`)
+        )
+      ) {
         return current;
       }
-      return [...current, node];
+      return [
+        ...current.filter((item) => !item.id.startsWith(`${node.id}/`)),
+        node,
+      ];
     });
   };
 
@@ -747,7 +775,7 @@ const Scanning = () => {
     node: DiskItem,
     deleted: boolean
   ) => {
-    if (isCloud || event.button !== 0 || node.id === "/" || deleted) {
+    if (event.button !== 0 || node.id === "/" || deleted) {
       return;
     }
 
@@ -762,7 +790,7 @@ const Scanning = () => {
   };
 
   const deleteSelected = async () => {
-    if (isCloud || !deleteList.length) {
+    if (!deleteList.length) {
       return;
     }
 
@@ -776,28 +804,64 @@ const Scanning = () => {
     const successfulIds = new Set<string>();
     const failedItems: DiskItem[] = [];
 
-    for (const node of deleteList) {
+    if (isCloud) {
       try {
-        await removeDir(node.id, { recursive: true }).catch(() =>
-          removeFile(node.id)
+        const result = await invoke<OneDriveDeleteResult>(
+          "delete_onedrive_items",
+          {
+            accountId,
+            itemIds: deleteList
+              .map((node) => node.cloudId)
+              .filter((itemId): itemId is string => Boolean(itemId)),
+          }
         );
-        successfulIds.add(node.id);
+        const deletedCloudIds = new Set(result.deletedIds);
+        for (const node of deleteList) {
+          if (node.cloudId && deletedCloudIds.has(node.cloudId)) {
+            successfulIds.add(node.id);
+          } else {
+            failedItems.push(node);
+          }
+        }
       } catch (error) {
         console.error(error);
-        failedItems.push(node);
-      } finally {
-        setDeleteState((current) => ({
-          ...current,
-          current: current.current + 1,
-        }));
+        failedItems.push(...deleteList);
+        setDeleteList(deleteList);
+        setDeleteState({
+          isDeleting: false,
+          total: deleteList.length,
+          current: 0,
+          failed: deleteList.length,
+          error: String(error),
+        });
+        return;
+      }
+    } else {
+      for (const node of deleteList) {
+        try {
+          await removeDir(node.id, { recursive: true }).catch(() =>
+            removeFile(node.id)
+          );
+          successfulIds.add(node.id);
+        } catch (error) {
+          console.error(error);
+          failedItems.push(node);
+        } finally {
+          setDeleteState((current) => ({
+            ...current,
+            current: current.current + 1,
+          }));
+        }
       }
     }
 
     if (successfulIds.size) {
       setDeletedIds((current) => new Set([...current, ...successfulIds]));
-      invoke("clear_cached_scan_result", { scanPath: disk, ratio }).catch(
-        console.error
-      );
+      if (!isCloud) {
+        invoke("clear_cached_scan_result", { scanPath: disk, ratio }).catch(
+          console.error
+        );
+      }
     }
 
     setDeleteList(failedItems);
@@ -807,7 +871,9 @@ const Scanning = () => {
       current: deleteList.length,
       failed: failedItems.length,
       error: failedItems.length
-        ? `Delete failed for ${failedItems.length} item${
+        ? `${isCloud ? "Move failed" : "Delete failed"} for ${
+            failedItems.length
+          } item${
             failedItems.length === 1 ? "" : "s"
           }`
         : null,
@@ -1153,11 +1219,7 @@ const Scanning = () => {
       </div>
 
       <div
-        className={`border-t border-slate-800 bg-slate-800 ${
-          isCloud
-            ? ""
-            : "grid grid-cols-[minmax(0,1fr)_360px] gap-px"
-        }`}
+        className="grid grid-cols-[minmax(0,1fr)_360px] gap-px border-t border-slate-800 bg-slate-800"
       >
         <div className="min-w-0 bg-slate-950 px-2 py-2">
           <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
@@ -1190,13 +1252,12 @@ const Scanning = () => {
             })}
           </div>
         </div>
-        {!isCloud && (
-          <div
-            ref={dropZoneRef}
-            className={`flex min-w-0 flex-col justify-between bg-slate-950 p-2 transition-colors ${
-              isDeleteTargetActive ? "bg-red-950/40" : ""
-            }`}
-          >
+        <div
+          ref={dropZoneRef}
+          className={`flex min-w-0 flex-col justify-between bg-slate-950 p-2 transition-colors ${
+            isDeleteTargetActive ? "bg-red-950/40" : ""
+          }`}
+        >
           <div
             className={`min-h-[42px] rounded border border-dashed px-2 py-1.5 text-center text-xs ${
               isDeleteTargetActive
@@ -1205,7 +1266,9 @@ const Scanning = () => {
             }`}
           >
             {deleteList.length === 0 ? (
-              "Drag files or folders here to delete"
+              isCloud
+                ? "Drag files or folders here to move them to the OneDrive Recycle Bin"
+                : "Drag files or folders here to delete"
             ) : (
               <div className="truncate text-left text-slate-200">
                 {deleteList.length} selected:{" "}
@@ -1221,7 +1284,8 @@ const Scanning = () => {
                     deleteState.error ? "font-medium text-red-300" : ""
                   }
                 >
-                  {deleteState.error || "Deleting"}
+                  {deleteState.error ||
+                    (isCloud ? "Moving to Recycle Bin" : "Deleting")}
                 </span>
                 <span>
                   {deleteState.current}/{deleteState.total}
@@ -1269,12 +1333,15 @@ const Scanning = () => {
               className="flex-1 rounded bg-red-700 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
             >
               {deleteState.isDeleting
-                ? `Deleting ${deleteState.current}/${deleteState.total}`
+                ? `${isCloud ? "Moving" : "Deleting"} ${
+                    deleteState.current
+                  }/${deleteState.total}`
+                : isCloud
+                ? "Move to Recycle Bin"
                 : "Delete"}
             </button>
           </div>
-          </div>
-        )}
+        </div>
       </div>
       {dragPreview && (
         <div

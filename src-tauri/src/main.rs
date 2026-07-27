@@ -1,5 +1,6 @@
 mod onedrive;
 mod scan;
+mod updates;
 mod window_style;
 
 use serde::Serialize;
@@ -51,6 +52,8 @@ fn main() {
             disconnect_onedrive_account,
             start_onedrive_scan,
             read_onedrive_scan_result,
+            delete_onedrive_items,
+            check_for_updates,
             open_full_disk_access_settings,
             show_in_folder
         ])
@@ -189,4 +192,18 @@ fn start_onedrive_scan(
 #[tauri::command]
 fn read_onedrive_scan_result(path: String) -> Result<String, String> {
     onedrive::read_scan_result(&path)
+}
+
+#[tauri::command]
+async fn delete_onedrive_items(
+    app_handle: tauri::AppHandle,
+    account_id: String,
+    item_ids: Vec<String>,
+) -> Result<onedrive::OneDriveDeleteResult, String> {
+    onedrive::delete_items(&app_handle, &account_id, item_ids).await
+}
+
+#[tauri::command]
+async fn check_for_updates() -> Result<updates::UpdateCheck, String> {
+    updates::check(env!("CARGO_PKG_VERSION")).await
 }

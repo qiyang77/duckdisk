@@ -45,6 +45,8 @@ pub struct OneDriveState {
 #[derive(Serialize, Deserialize)]
 struct StoredCredential {
     refresh_token: String,
+    #[serde(default)]
+    can_delete: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -137,6 +139,27 @@ struct CompletedPayload {
     errors_path: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteStatusPayload {
+    current: u64,
+    total: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OneDriveDeleteFailure {
+    item_id: String,
+    message: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OneDriveDeleteResult {
+    deleted_ids: Vec<String>,
+    failures: Vec<OneDriveDeleteFailure>,
+}
+
 pub fn get_state(app_handle: &tauri::AppHandle) -> Result<OneDriveState, String> {
     Ok(OneDriveState {
         configured: !client_id().is_empty(),
@@ -155,7 +178,7 @@ pub async fn connect_account(app_handle: &tauri::AppHandle) -> Result<OneDriveAc
         .authorize_url(CsrfToken::new_random)
         .set_pkce_challenge(pkce_challenge)
         .add_scope(Scope::new("offline_access".to_string()))
-        .add_scope(Scope::new("Files.Read".to_string()))
+        .add_scope(Scope::new("Files.ReadWrite".to_string()))
         .add_extra_param("prompt", "select_account")
         .url();
 
@@ -191,7 +214,7 @@ pub async fn connect_account(app_handle: &tauri::AppHandle) -> Result<OneDriveAc
     )
     .await?;
     let account = account_from_drive(&drive);
-    store_credential(&account.id, &refresh_token)?;
+    store_credential(&account.id, &refresh_token, true)?;
     upsert_account(app_handle, account.clone())?;
     Ok(account)
 }
@@ -260,6 +283,84 @@ pub fn read_scan_result(path: &str) -> Result<String, String> {
         return Err("Refusing to read OneDrive result outside the temporary directory".to_string());
     }
     fs::read_to_string(path).map_err(|err| err.to_string())
+}
+
+pub async fn delete_items(
+    app_handle: &tauri::AppHandle,
+    account_id: &str,
+    item_ids: Vec<String>,
+) -> Result<OneDriveDeleteResult, String> {
+    if item_ids.is_empty() {
+        return Ok(OneDriveDeleteResult {
+            deleted_ids: Vec::new(),
+            failures: Vec::new(),
+        });
+    }
+    if !read_accounts(app_handle)?
+        .iter()
+        .any(|account| account.id == account_id)
+    {
+        return Err("OneDrive account is not connected".to_string());
+    }
+    if !read_credential(account_id)?.can_delete {
+        return Err(
+            "Reconnect OneDrive from All Disks to grant permission to move items to the Recycle Bin."
+                .to_string(),
+        );
+    }
+
+    let access_token = refresh_access_token(account_id).await?;
+    let http = Client::new();
+    let total = item_ids.len() as u64;
+    let mut deleted_ids = Vec::new();
+    let mut failures = Vec::new();
+
+    for (index, item_id) in item_ids.into_iter().enumerate() {
+        let result = match drive_item_url(account_id, &item_id) {
+            Ok(url) => graph_delete(&http, &access_token, &url).await,
+            Err(err) => Err(err),
+        };
+        match result {
+            Ok(()) => deleted_ids.push(item_id),
+            Err(message) => failures.push(OneDriveDeleteFailure { item_id, message }),
+        }
+        app_handle
+            .emit_all(
+                "onedrive_delete_status",
+                DeleteStatusPayload {
+                    current: index as u64 + 1,
+                    total,
+                },
+            )
+            .ok();
+    }
+
+    if !deleted_ids.is_empty() {
+        let path = cache_path(app_handle, account_id)?;
+        if let Some(mut cache) = read_cache(&path, account_id) {
+            for item_id in &deleted_ids {
+                remove_cached_subtree(&mut cache, item_id);
+            }
+            if write_cache(&path, &cache).is_err() {
+                fs::remove_file(path).ok();
+            }
+        }
+
+        if let Ok(drive) = graph_get::<GraphDrive>(
+            &http,
+            &access_token,
+            &format!("{GRAPH_ROOT}/me/drive?$select=id,driveType,owner,quota"),
+        )
+        .await
+        {
+            upsert_account(app_handle, account_from_drive(&drive)).ok();
+        }
+    }
+
+    Ok(OneDriveDeleteResult {
+        deleted_ids,
+        failures,
+    })
 }
 
 async fn scan_account(
@@ -484,7 +585,7 @@ async fn refresh_access_token(account_id: &str) -> Result<String, String> {
         .map_err(|err| format!("Could not refresh Microsoft sign-in: {err}"))?;
 
     if let Some(refresh_token) = token.refresh_token() {
-        store_credential(account_id, refresh_token.secret())?;
+        store_credential(account_id, refresh_token.secret(), credential.can_delete)?;
     }
     Ok(token.access_token().secret().to_string())
 }
@@ -523,6 +624,67 @@ async fn graph_get<T: DeserializeOwned>(
         }
         return response.json::<T>().await.map_err(|err| err.to_string());
     }
+}
+
+async fn graph_delete(http: &Client, access_token: &str, url: &str) -> Result<(), String> {
+    let mut attempts = 0;
+    loop {
+        let response = http
+            .delete(url)
+            .bearer_auth(access_token)
+            .send()
+            .await
+            .map_err(|err| err.to_string())?;
+        let status = response.status();
+        if status == StatusCode::NO_CONTENT || status == StatusCode::NOT_FOUND {
+            return Ok(());
+        }
+        if status == StatusCode::TOO_MANY_REQUESTS || status == StatusCode::SERVICE_UNAVAILABLE {
+            attempts += 1;
+            if attempts > 5 {
+                return Err(format!("Microsoft Graph remained unavailable ({status})"));
+            }
+            let delay = response
+                .headers()
+                .get("retry-after")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(2_u64.pow(attempts));
+            tokio::time::sleep(Duration::from_secs(delay.min(60))).await;
+            continue;
+        }
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Microsoft Graph returned {status}: {body}"));
+    }
+}
+
+fn drive_item_url(account_id: &str, item_id: &str) -> Result<String, String> {
+    let mut url = Url::parse(&format!("{GRAPH_ROOT}/")).map_err(|err| err.to_string())?;
+    url.path_segments_mut()
+        .map_err(|_| "Could not build Microsoft Graph item URL".to_string())?
+        .extend(["drives", account_id, "items", item_id]);
+    Ok(url.to_string())
+}
+
+fn remove_cached_subtree(cache: &mut OneDriveCache, root_id: &str) {
+    let mut removed = HashSet::from([root_id.to_string()]);
+    loop {
+        let before = removed.len();
+        for item in cache.items.values() {
+            if item
+                .parent_id
+                .as_ref()
+                .map(|parent_id| removed.contains(parent_id))
+                .unwrap_or(false)
+            {
+                removed.insert(item.id.clone());
+            }
+        }
+        if removed.len() == before {
+            break;
+        }
+    }
+    cache.items.retain(|item_id, _| !removed.contains(item_id));
 }
 
 fn wait_for_oauth_callback(listener: TcpListener, expected_state: &str) -> Result<String, String> {
@@ -639,10 +801,11 @@ fn required_client_id() -> Result<String, String> {
     }
 }
 
-fn store_credential(account_id: &str, refresh_token: &str) -> Result<(), String> {
+fn store_credential(account_id: &str, refresh_token: &str, can_delete: bool) -> Result<(), String> {
     let entry = keyring::Entry::new(KEYCHAIN_SERVICE, account_id).map_err(|err| err.to_string())?;
     let value = serde_json::to_string(&StoredCredential {
         refresh_token: refresh_token.to_string(),
+        can_delete,
     })
     .map_err(|err| err.to_string())?;
     entry.set_password(&value).map_err(|err| err.to_string())
@@ -863,5 +1026,37 @@ mod tests {
             },
         );
         assert!(!cache.items.contains_key("file"));
+    }
+
+    #[test]
+    fn cache_delete_removes_folder_descendants() {
+        let mut cache = OneDriveCache {
+            version: CACHE_VERSION.to_string(),
+            account_id: "drive".to_string(),
+            root_id: "root".to_string(),
+            delta_link: "delta".to_string(),
+            items: HashMap::from([
+                ("root".to_string(), item("root", None, "root", 0, true)),
+                (
+                    "folder".to_string(),
+                    item("folder", Some("root"), "folder", 0, true),
+                ),
+                (
+                    "child".to_string(),
+                    item("child", Some("folder"), "child.txt", 12, false),
+                ),
+                (
+                    "keep".to_string(),
+                    item("keep", Some("root"), "keep.txt", 8, false),
+                ),
+            ]),
+        };
+
+        remove_cached_subtree(&mut cache, "folder");
+
+        assert!(!cache.items.contains_key("folder"));
+        assert!(!cache.items.contains_key("child"));
+        assert!(cache.items.contains_key("root"));
+        assert!(cache.items.contains_key("keep"));
     }
 }
