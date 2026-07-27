@@ -405,18 +405,25 @@ async fn scan_account(
     loop {
         let page: DeltaPage = match graph_get(&http, &access_token, &next_url).await {
             Ok(page) => page,
-            Err(err) if can_restart_full && err.contains("410 Gone") => {
+            Err(err) if can_restart_full && is_delta_resync_error(&err) => {
+                fs::remove_file(&path).ok();
                 cache = create_empty_cache(&http, &access_token, account_id).await?;
                 next_url = initial_delta_url();
                 can_restart_full = false;
                 changed_items = 0;
                 changed_bytes = 0;
+                emit_scan_status(app_handle, 0, 0);
                 app_handle.emit_all("scan_full", ()).ok();
                 continue;
             }
+            Err(err) if is_delta_resync_error(&err) => {
+                return Err(
+                    "OneDrive could not restart its change index. Use Clean Cache & Rescan."
+                        .to_string(),
+                )
+            }
             Err(err) => return Err(err),
         };
-        can_restart_full = false;
         for item in page.value {
             changed_items += 1;
             if item.folder.is_none() && item.deleted.is_none() {
@@ -624,6 +631,14 @@ async fn graph_get<T: DeserializeOwned>(
         }
         return response.json::<T>().await.map_err(|err| err.to_string());
     }
+}
+
+fn is_delta_resync_error(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("410 gone")
+        || message.contains("resyncrequired")
+        || message.contains("resyncchangesapplydifferences")
+        || message.contains("resyncchangesuploaddifferences")
 }
 
 async fn graph_delete(http: &Client, access_token: &str, url: &str) -> Result<(), String> {
@@ -1058,5 +1073,18 @@ mod tests {
         assert!(!cache.items.contains_key("child"));
         assert!(cache.items.contains_key("root"));
         assert!(cache.items.contains_key("keep"));
+    }
+
+    #[test]
+    fn recognizes_delta_resync_errors() {
+        assert!(is_delta_resync_error(
+            r#"Microsoft Graph returned 410 Gone: {"error":{"code":"resyncRequired"}}"#
+        ));
+        assert!(is_delta_resync_error(
+            r#"{"error":{"code":"resyncChangesApplyDifferences"}}"#
+        ));
+        assert!(!is_delta_resync_error(
+            "Microsoft Graph remained unavailable (429 Too Many Requests)"
+        ));
     }
 }

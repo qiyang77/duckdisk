@@ -1,7 +1,7 @@
 import * as d3 from "d3";
-import prettyBytes from "pretty-bytes";
 import { v4 as uuidv4 } from "uuid";
 import pSBC from "shade-blend-color";
+import { formatBytes } from "./formatBytes";
 
 const depthmap: any = {
   0: 0,
@@ -215,8 +215,6 @@ const updateData = (
   // console.log({filtered})
   // Data deve essere
   // console.log({fd: focused.descendants().slice(1, 50)})
-  const mul = 1000;
-
   let path = innerG
     .selectAll<SVGPathElement, D3HierarchyDiskItem>("path")
     .data(filtered, (d) => d.data.id)
@@ -248,9 +246,7 @@ const updateData = (
               .ancestors()
               .map((d) => d.data.name)
               .reverse()
-              .join("/")}\n${((d.data.size || 0) / mul / mul / mul).toFixed(
-              2
-            )} GB`
+              .join("/")}\n${formatBytes(d.data.size || 0, 2)}`
         );
         return xx;
       },

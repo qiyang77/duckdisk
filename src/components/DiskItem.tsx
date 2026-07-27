@@ -2,6 +2,7 @@ import diskIcon from "../assets/harddisk.png";
 import removableDriver from "../assets/removable-drive.png";
 
 import { useNavigate } from "react-router-dom";
+import { formatBytes } from "../formatBytes";
 
 const DiskItem = ({ disk }: any) => {
   const navigate = useNavigate();
@@ -15,8 +16,6 @@ const DiskItem = ({ disk }: any) => {
   const xy: any = x.find((e) => perc > e.from && perc <= e.to);
 
   const icona = disk.isRemovable ? removableDriver : diskIcon;
-  const mul = 1000;
-
   return (
     <div
       onContextMenu={(e) => {
@@ -48,14 +47,14 @@ const DiskItem = ({ disk }: any) => {
             <span className="text-xs">({disk.sMountPoint})</span>
             <br />
             <span className=" text-sm font-medium mr-2 px-2.5 py-0.5 rounded bg-gray-700 text-gray-300">
-              {(disk.totalSpace / mul / mul / mul).toFixed(1)} GB
+              {formatBytes(disk.totalSpace)}
             </span>
             {/* <span className="opacity-60"></span> */}
           </span>
           <span className="text-sm font-medium text-right text-white">
             {(perc * 100).toFixed(0)}%<br />
             <span className="opacity-60">
-              {(disk.availableSpace / mul / mul / mul).toFixed(1)} GB Free
+              {formatBytes(disk.availableSpace)} Free
             </span>
           </span>
         </div>

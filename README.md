@@ -13,7 +13,7 @@ The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
 Website: https://qiyang77.github.io/duckdisk/
 
-> **New in v0.5.3: OneDrive analysis.** Connect your Microsoft account to inspect cloud storage without downloading file contents, refresh results using incremental changes, and move selected cloud files or folders to the OneDrive Recycle Bin.
+> **New in v0.5.4: safer, more resilient OneDrive scans.** DuckDisk explains macOS Keychain access before scanning, automatically rebuilds expired Microsoft Graph delta indexes, and displays local and OneDrive capacities using 1024-based units.
 
 ## Screenshots
 

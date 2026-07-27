@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
 import { removeDir, removeFile } from "@tauri-apps/api/fs";
 import diskIcon from "../assets/harddisk.png";
 import duckIcon from "../assets/duck-scan.png";
+import { formatBytes } from "../formatBytes";
 
 type ScanStatus = {
   items: number;
@@ -102,24 +103,6 @@ type ScanErrorReport = {
   records: ScanErrorRecord[];
 };
 
-const bytesFormatter = new Intl.NumberFormat(undefined, {
-  maximumFractionDigits: 1,
-});
-
-const formatBytes = (bytes = 0) => {
-  if (!Number.isFinite(bytes) || bytes <= 0) {
-    return "0 B";
-  }
-
-  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
-  const index = Math.min(
-    Math.floor(Math.log(bytes) / Math.log(1000)),
-    units.length - 1
-  );
-  const value = bytes / Math.pow(1000, index);
-  return `${bytesFormatter.format(value)} ${units[index]}`;
-};
-
 const getChildren = (node?: DiskItem | null) =>
   [...(node?.children || [])].sort((a, b) => (b.size || 0) - (a.size || 0));
 
@@ -212,6 +195,7 @@ const emptyScanErrorReport = {
   counts: emptyScanErrorCounts,
   records: [],
 };
+const oneDriveKeychainNoticeKey = "duckdisk-onedrive-keychain-notice-seen";
 
 const totalScanIssues = (counts: ScanErrorCounts) =>
   counts.operationNotPermitted +
@@ -405,6 +389,7 @@ const ScanningDuck = () => (
 
 const Scanning = () => {
   const location = useLocation() as { state?: RouteState };
+  const navigate = useNavigate();
   const {
     disk = "/",
     used = 0,
@@ -430,6 +415,11 @@ const Scanning = () => {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [loadedFromCache, setLoadedFromCache] = useState(false);
   const [scanNonce, setScanNonce] = useState(0);
+  const [oneDriveKeychainApproved, setOneDriveKeychainApproved] = useState(
+    () =>
+      source !== "onedrive" ||
+      sessionStorage.getItem(oneDriveKeychainNoticeKey) === "true"
+  );
   const [deleteList, setDeleteList] = useState<DiskItem[]>([]);
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
@@ -551,6 +541,9 @@ const Scanning = () => {
           setScanPhase("failed");
           return;
         }
+        if (!oneDriveKeychainApproved) {
+          return;
+        }
         setLoadedFromCache(false);
         setScanPhase(scanNonce === 0 ? "checkingCache" : "scanning");
         scanningStarted = true;
@@ -617,7 +610,14 @@ const Scanning = () => {
         invoke("stop_scanning", { path: disk });
       }
     };
-  }, [accountId, disk, isCloud, ratio, scanNonce]);
+  }, [
+    accountId,
+    disk,
+    isCloud,
+    oneDriveKeychainApproved,
+    ratio,
+    scanNonce,
+  ]);
 
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
@@ -879,6 +879,55 @@ const Scanning = () => {
         : null,
     });
   };
+
+  if (view === "loading" && isCloud && !oneDriveKeychainApproved) {
+    return (
+      <div className="flex flex-1 items-center justify-center overflow-auto bg-slate-950 px-6 py-10 text-slate-200">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="onedrive-keychain-title"
+          className="w-full max-w-lg rounded border border-slate-700 bg-slate-900 p-6 shadow-2xl"
+        >
+          <div className="text-xs font-semibold uppercase text-sky-400">
+            OneDrive security
+          </div>
+          <h1
+            id="onedrive-keychain-title"
+            className="mt-2 text-xl font-semibold text-white"
+          >
+            Allow access to your saved sign-in
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-slate-300">
+            DuckDisk stores your Microsoft sign-in token in macOS Keychain. To
+            refresh this OneDrive scan, DuckDisk needs to read that saved token.
+          </p>
+          <p className="mt-3 text-sm leading-6 text-slate-400">
+            macOS may ask for your Mac login password. The password is handled
+            by macOS and is never received or stored by DuckDisk.
+          </p>
+          <div className="mt-6 flex justify-end gap-3">
+            <button
+              onClick={() => navigate("/")}
+              className="rounded border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800"
+            >
+              Not Now
+            </button>
+            <button
+              autoFocus
+              onClick={() => {
+                sessionStorage.setItem(oneDriveKeychainNoticeKey, "true");
+                setOneDriveKeychainApproved(true);
+              }}
+              className="rounded border border-sky-400 bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-400"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (view === "loading") {
     return (

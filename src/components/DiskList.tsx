@@ -8,6 +8,7 @@ import { open } from "@tauri-apps/api/dialog";
 import { open as openExternal } from "@tauri-apps/api/shell";
 import folderIcon from "../assets/folder.png";
 import { useNavigate } from "react-router-dom";
+import { formatBytes } from "../formatBytes";
 
 type OneDriveAccount = {
   id: string;
@@ -28,18 +29,6 @@ type UpdateCheck = {
   latestVersion: string;
   updateAvailable: boolean;
   releaseUrl: string;
-};
-
-const formatBytes = (bytes: number) => {
-  if (!bytes) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
-  const index = Math.min(
-    Math.floor(Math.log(bytes) / Math.log(1000)),
-    units.length - 1
-  );
-  return `${(bytes / Math.pow(1000, index)).toFixed(index ? 1 : 0)} ${
-    units[index]
-  }`;
 };
 
 const CloudIcon = () => (
