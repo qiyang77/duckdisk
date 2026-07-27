@@ -7,17 +7,19 @@
 ![arch](https://img.shields.io/badge/arch-arm64-lightgrey)
 ![stack](https://img.shields.io/badge/stack-Tauri%20%7C%20Rust%20%7C%20React-orange)
 
-**DuckDisk** is a macOS disk usage analyzer inspired by **WizTree-style** workflows. It scans disks and folders, shows where space is going in dense tables, and lets you quickly reveal or delete large files from one place.
+**DuckDisk** is a macOS disk and cloud storage analyzer inspired by **WizTree-style** workflows. It scans disks, folders, and OneDrive metadata, shows where space is going in dense tables, and lets you quickly reveal or remove large items from one place.
 
 The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
 Website: https://qiyang77.github.io/duckdisk/
 
+> **New in v0.5.3: OneDrive analysis.** Connect your Microsoft account to inspect cloud storage without downloading file contents, refresh results using incremental changes, and move selected cloud files or folders to the OneDrive Recycle Bin.
+
 ## Screenshots
 
-### Disk List
+### Local and Cloud Storage
 
-![DuckDisk disk list](docs/screenshots/disk-list.png)
+![DuckDisk local disks and connected OneDrive storage](docs/screenshots/disk-list.png)
 
 ### Scan Progress
 
@@ -29,10 +31,11 @@ Website: https://qiyang77.github.io/duckdisk/
 
 ## Features
 
+- **OneDrive cloud analysis** using file metadata only, without downloading file contents.
+- **Fast incremental cloud refreshes** using Microsoft Graph delta updates and a local metadata cache.
+- **OneDrive cleanup** that moves selected files and folders to the Recycle Bin.
 - **Dense tree view** with folder/file counts, sizes, allocated size, and parent percentage.
-- **OneDrive cloud scan** using file metadata only, without downloading file contents.
-- Fast repeat OneDrive scans using Microsoft Graph delta updates.
-- **Drag-to-delete** function.
+- **Drag-to-delete** cleanup for local and OneDrive scan results.
 - File type summary with extension totals and percentages.
 - Finder integration for revealing files and folders.
 
