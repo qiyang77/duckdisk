@@ -7,6 +7,11 @@ import { removeDir, removeFile } from "@tauri-apps/api/fs";
 import diskIcon from "../assets/harddisk.png";
 import duckIcon from "../assets/duck-scan.png";
 import { formatBytes } from "../formatBytes";
+import {
+  type DiskRouteState,
+  readDiskRoute,
+  rememberDiskRoute,
+} from "../diskRoute";
 
 type ScanStatus = {
   items: number;
@@ -38,14 +43,6 @@ type ExtensionStat = {
   type: string;
   size: number;
   files: number;
-};
-
-type RouteState = {
-  disk: string;
-  used?: number;
-  fullscan?: boolean;
-  source?: "local" | "onedrive";
-  accountId?: string;
 };
 
 type VisibleRow = {
@@ -82,6 +79,17 @@ type DragPreview = {
   node: DiskItem;
   x: number;
   y: number;
+};
+
+type ContextMenuState = {
+  node: DiskItem;
+  x: number;
+  y: number;
+};
+
+type RefreshNotice = {
+  kind: "success" | "error";
+  message: string;
 };
 
 type ScanErrorCounts = {
@@ -336,6 +344,56 @@ const findNode = (root: DiskItem | null, id: string): DiskItem | null => {
   return null;
 };
 
+const replaceTreeNode = (
+  root: DiskItem,
+  nodeId: string,
+  replacement: DiskItem
+): DiskItem => {
+  if (root.id === nodeId) {
+    return replacement;
+  }
+
+  return {
+    ...root,
+    children: (root.children || []).map((child) =>
+      child.id === nodeId
+        ? replacement
+        : nodeId.startsWith(`${child.id}/`)
+        ? replaceTreeNode(child, nodeId, replacement)
+        : child
+    ),
+  };
+};
+
+const childNodeId = (parentId: string, name: string) =>
+  parentId === "/"
+    ? `/${name.replace(/^\/+/, "")}`
+    : `${parentId}/${name.replace(/^\/+/, "")}`;
+
+const mapRefreshedTree = (raw: any, original: DiskItem): DiskItem => {
+  const walk = (item: any, id: string, isRoot = false): DiskItem => {
+    const children = Array.isArray(item.children)
+      ? item.children.map((child: any) =>
+          walk(child, childNodeId(id, String(child.name || "(unnamed)")))
+        )
+      : [];
+    const size = Number(item.size || 0);
+    return {
+      ...item,
+      id,
+      name: isRoot ? original.name : String(item.name || "(unnamed)"),
+      value: size,
+      size,
+      isDirectory: isRoot
+        ? isDirectory(original)
+        : Boolean(item.isDirectory || children.length),
+      children,
+    };
+  };
+
+  return walk(raw, original.id, true);
+};
+
 const removeNodes = (
   node: DiskItem | null,
   deletedIds: Set<string>
@@ -388,14 +446,15 @@ const ScanningDuck = () => (
 );
 
 const Scanning = () => {
-  const location = useLocation() as { state?: RouteState };
+  const location = useLocation() as { state?: DiskRouteState };
   const navigate = useNavigate();
+  const routeState = location.state || readDiskRoute() || undefined;
   const {
     disk = "/",
     used = 0,
     source = "local",
     accountId = "",
-  } = location.state || {};
+  } = routeState || {};
   const isCloud = source === "onedrive";
   const ratio = "0";
 
@@ -423,6 +482,9 @@ const Scanning = () => {
   const [deleteList, setDeleteList] = useState<DiskItem[]>([]);
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [refreshingNodeId, setRefreshingNodeId] = useState<string | null>(null);
+  const [refreshNotice, setRefreshNotice] = useState<RefreshNotice | null>(null);
   const [isDeleteTargetActive, setDeleteTargetActive] = useState(false);
   const [deleteState, setDeleteState] = useState<DeleteState>({
     isDeleting: false,
@@ -433,33 +495,84 @@ const Scanning = () => {
   });
 
   useEffect(() => {
+    if (routeState?.disk) {
+      rememberDiskRoute(routeState);
+    }
+  }, [routeState]);
+
+  useEffect(() => {
+    const preventNativeContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+    };
+    const closeContextMenu = () => setContextMenu(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeContextMenu();
+      }
+    };
+
+    window.addEventListener("contextmenu", preventNativeContextMenu);
+    window.addEventListener("pointerdown", closeContextMenu);
+    window.addEventListener("resize", closeContextMenu);
+    window.addEventListener("scroll", closeContextMenu, true);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("contextmenu", preventNativeContextMenu);
+      window.removeEventListener("pointerdown", closeContextMenu);
+      window.removeEventListener("resize", closeContextMenu);
+      window.removeEventListener("scroll", closeContextMenu, true);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  useEffect(() => {
     let disposed = false;
     let scanningStarted = false;
 
-    const unlistenStatus = listen("scan_status", (event: any) => {
+    const cloudEventMatches = (event: any) =>
+      !isCloud || event.payload?.accountId === accountId;
+    const eventName = (name: string) =>
+      isCloud ? `onedrive_${name}` : name;
+
+    const unlistenStatus = listen(eventName("scan_status"), (event: any) => {
+      if (!cloudEventMatches(event)) return;
       setStatus(event.payload as ScanStatus);
     });
 
-    const unlistenFinalizing = listen("scan_finalizing", () => {
+    const unlistenFinalizing = listen(eventName("scan_finalizing"), (event) => {
+      if (!cloudEventMatches(event)) return;
       setScanPhase("finalizing");
     });
 
-    const unlistenIncremental = listen("scan_incremental", () => {
+    const unlistenIncremental = listen(eventName("scan_incremental"), (event) => {
+      if (!cloudEventMatches(event)) return;
       setLoadedFromCache(true);
       setScanPhase("incremental");
     });
 
-    const unlistenFull = listen("scan_full", () => {
+    const unlistenFull = listen(eventName("scan_full"), (event) => {
+      if (!cloudEventMatches(event)) return;
       setLoadedFromCache(false);
       setScanPhase("scanning");
     });
 
-    const unlistenFailed = listen("scan_failed", (event: any) => {
-      setScanError(String(event.payload));
-      setScanPhase("failed");
-    });
+    const unlistenFailed = !isCloud
+      ? listen("scan_failed", (event: any) => {
+          setScanError(String(event.payload));
+          setScanPhase("failed");
+        })
+      : Promise.resolve(() => {});
 
-    const unlistenCompleted = listen("scan_completed", async (event: any) => {
+    const unlistenCloudFailed = isCloud
+      ? listen("onedrive_scan_failed", (event: any) => {
+          if (!cloudEventMatches(event)) return;
+          setScanError(String(event.payload.message));
+          setScanPhase("failed");
+        })
+      : Promise.resolve(() => {});
+
+    const unlistenCompleted = listen(eventName("scan_completed"), async (event: any) => {
+      if (!cloudEventMatches(event)) return;
       try {
         setScanPhase("preparing");
         const payload = event.payload as { path: string; errorsPath: string };
@@ -603,6 +716,7 @@ const Scanning = () => {
       unlistenIncremental.then((dispose) => dispose());
       unlistenFull.then((dispose) => dispose());
       unlistenFailed.then((dispose) => dispose());
+      unlistenCloudFailed.then((dispose) => dispose());
       unlistenCompleted.then((dispose) => dispose());
       unlistenDeleteStatus.then((dispose) => dispose());
       worker.current?.terminate();
@@ -712,6 +826,8 @@ const Scanning = () => {
     !isCloud && (issueCount > 0 || loadedFromCache);
   const scanPercent =
     used > 0 ? Math.min(100, (Math.min(scannedTotal, used) / used) * 100) : 0;
+  const hasDeterminateProgress =
+    !isCloud && scanPhase === "scanning" && status !== null && used > 0;
   const topBlocks = childRows
     .filter((node) => !isDeletedPath(node.id, deletedIds))
     .slice(0, 20);
@@ -770,6 +886,59 @@ const Scanning = () => {
     });
   };
 
+  const refreshNode = async (node: DiskItem) => {
+    if (refreshingNodeId) {
+      return;
+    }
+
+    setContextMenu(null);
+    setRefreshNotice(null);
+    setRefreshingNodeId(node.id);
+    try {
+      if (isCloud && !node.cloudId) {
+        throw new Error("The selected OneDrive item has no cloud identifier");
+      }
+      const content = isCloud
+        ? await invoke<string>("refresh_onedrive_item", {
+            accountId,
+            itemId: node.cloudId,
+          })
+        : await invoke<string>("refresh_scan_path", {
+            scanPath: disk,
+            targetPath: node.id,
+            ratio,
+          });
+      const parsed = JSON.parse(content);
+      const refreshed = mapRefreshedTree(
+        isCloud ? parsed : parsed.tree,
+        node
+      );
+      if (!rootNode) {
+        throw new Error("The scan tree is no longer available");
+      }
+
+      const nextRoot = replaceTreeNode(rootNode, node.id, refreshed);
+      setRootNode(nextRoot);
+      setCurrentNode((current) =>
+        current ? findNode(nextRoot, current.id) || nextRoot : nextRoot
+      );
+      setDeleteList((current) =>
+        current.map((item) => findNode(nextRoot, item.id) || item)
+      );
+      setRefreshNotice({
+        kind: "success",
+        message: `${getNodeName(node)} updated`,
+      });
+    } catch (error) {
+      setRefreshNotice({
+        kind: "error",
+        message: String(error),
+      });
+    } finally {
+      setRefreshingNodeId(null);
+    }
+  };
+
   const startPointerDrag = (
     event: ReactPointerEvent<HTMLElement>,
     node: DiskItem,
@@ -803,6 +972,7 @@ const Scanning = () => {
     });
     const successfulIds = new Set<string>();
     const failedItems: DiskItem[] = [];
+    let cloudFailureMessage: string | null = null;
 
     if (isCloud) {
       try {
@@ -815,6 +985,7 @@ const Scanning = () => {
               .filter((itemId): itemId is string => Boolean(itemId)),
           }
         );
+        cloudFailureMessage = result.failures[0]?.message || null;
         const deletedCloudIds = new Set(result.deletedIds);
         for (const node of deleteList) {
           if (node.cloudId && deletedCloudIds.has(node.cloudId)) {
@@ -865,6 +1036,9 @@ const Scanning = () => {
     }
 
     setDeleteList(failedItems);
+    const compactCloudFailure = cloudFailureMessage
+      ?.replace(/\s+/g, " ")
+      .slice(0, 220);
     setDeleteState({
       isDeleting: false,
       total: deleteList.length,
@@ -875,7 +1049,7 @@ const Scanning = () => {
             failedItems.length
           } item${
             failedItems.length === 1 ? "" : "s"
-          }`
+          }${compactCloudFailure ? `: ${compactCloudFailure}` : ""}`
         : null,
     });
   };
@@ -948,9 +1122,11 @@ const Scanning = () => {
                   ? `${status.items.toLocaleString()} cloud items received${
                       status.total ? ` - ${formatBytes(status.total)}` : ""
                     }`
-                  : `${status.items.toLocaleString()} files - ${formatBytes(
-                      status.total
-                    )}${used > 0 ? ` - ${scanPercent.toFixed(1)}%` : ""}${
+                  : `${status.items.toLocaleString()} ${
+                      scanPhase === "incremental" ? "files checked" : "files"
+                    } - ${formatBytes(status.total)}${
+                      scanPhase === "incremental" ? " rescanned" : ""
+                    }${hasDeterminateProgress ? ` - ${scanPercent.toFixed(1)}%` : ""}${
                     totalScanIssues(status) ? ` - ${formatScanIssueCounts(status)}` : ""
                   }`
                 : "Waiting for scan progress"}
@@ -958,11 +1134,13 @@ const Scanning = () => {
           )}
           <div className="h-3 w-full overflow-hidden rounded-full bg-slate-800">
             <div
-              className="h-3 rounded-full bg-sky-500 progress-shimmer"
+              className={`h-3 rounded-full bg-sky-500 ${
+                hasDeterminateProgress
+                  ? "progress-shimmer"
+                  : "progress-indeterminate"
+              }`}
               style={{
-                width: `${
-                  !isCloud && status && used > 0 ? scanPercent : 100
-                }%`,
+                width: `${hasDeterminateProgress ? scanPercent : 32}%`,
               }}
             />
           </div>
@@ -988,6 +1166,24 @@ const Scanning = () => {
               </button>
             )}
             <span className="truncate">{currentNode?.id || disk}</span>
+            {refreshingNodeId && (
+              <span className="inline-flex shrink-0 items-center gap-1.5 text-sky-300">
+                <span className="h-2.5 w-2.5 animate-spin rounded-full border border-sky-300 border-t-transparent" />
+                Refreshing {getNodeName(findNode(rootNode, refreshingNodeId) || ({ id: refreshingNodeId } as DiskItem))}
+              </span>
+            )}
+            {!refreshingNodeId && refreshNotice && (
+              <span
+                className={
+                  refreshNotice.kind === "error"
+                    ? "truncate text-red-300"
+                    : "truncate text-emerald-300"
+                }
+                title={refreshNotice.message}
+              >
+                {refreshNotice.message}
+              </span>
+            )}
             {loadedFromCache && (
               <span className="rounded border border-emerald-700/60 px-2 py-0.5 text-emerald-300">
                 {isCloud ? "Delta updated" : "Cached"}
@@ -1137,11 +1333,16 @@ const Scanning = () => {
                       key={node.id || `${node.name}-${index}`}
                       onPointerDown={(event) => startPointerDrag(event, node, deleted)}
                       onContextMenu={(event) => {
-                        if (isCloud) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (deleted) {
                           return;
                         }
-                        event.preventDefault();
-                        reveal(node);
+                        setContextMenu({
+                          node,
+                          x: Math.min(event.clientX, window.innerWidth - 224),
+                          y: Math.min(event.clientY, window.innerHeight - 210),
+                        });
                       }}
                       style={
                         deleted
@@ -1401,6 +1602,66 @@ const Scanning = () => {
           }}
         >
           {getNodeName(dragPreview.node)}
+        </div>
+      )}
+      {contextMenu && (
+        <div
+          role="menu"
+          aria-label={`Actions for ${getNodeName(contextMenu.node)}`}
+          onPointerDown={(event) => event.stopPropagation()}
+          className="fixed z-[90] w-52 overflow-hidden rounded border border-slate-600 bg-slate-900 py-1 text-xs text-slate-100 shadow-2xl"
+          style={{
+            left: Math.max(8, contextMenu.x),
+            top: Math.max(8, contextMenu.y),
+          }}
+        >
+          <div className="truncate border-b border-slate-700 px-3 py-2 font-semibold text-white">
+            {getNodeName(contextMenu.node)}
+          </div>
+          {isDirectory(contextMenu.node) && (
+            <button
+              role="menuitem"
+              onClick={() => {
+                setCurrentNode(contextMenu.node);
+                setExpandedIds(new Set());
+                setContextMenu(null);
+              }}
+              className="block w-full px-3 py-2 text-left hover:bg-slate-800"
+            >
+              Open Folder
+            </button>
+          )}
+          <button
+            role="menuitem"
+            disabled={Boolean(refreshingNodeId)}
+            onClick={() => refreshNode(contextMenu.node)}
+            className="block w-full px-3 py-2 text-left hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Refresh This {isDirectory(contextMenu.node) ? "Folder" : "File"}
+          </button>
+          {!isCloud && (
+            <button
+              role="menuitem"
+              onClick={() => {
+                reveal(contextMenu.node);
+                setContextMenu(null);
+              }}
+              className="block w-full px-3 py-2 text-left hover:bg-slate-800"
+            >
+              Reveal in Finder
+            </button>
+          )}
+          <div className="my-1 border-t border-slate-700" />
+          <button
+            role="menuitem"
+            onClick={() => {
+              addDeleteTarget(contextMenu.node);
+              setContextMenu(null);
+            }}
+            className="block w-full px-3 py-2 text-left text-red-300 hover:bg-red-950/40"
+          >
+            {isCloud ? "Add to Recycle Bin List" : "Add to Delete List"}
+          </button>
         </div>
       )}
       {showScanIssues && (

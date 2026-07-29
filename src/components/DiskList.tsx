@@ -9,6 +9,7 @@ import { open as openExternal } from "@tauri-apps/api/shell";
 import folderIcon from "../assets/folder.png";
 import { useNavigate } from "react-router-dom";
 import { formatBytes } from "../formatBytes";
+import { forgetDiskRoute } from "../diskRoute";
 
 type OneDriveAccount = {
   id: string;
@@ -67,6 +68,7 @@ const DiskList = () => {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const navigate = useNavigate();
   useEffect(() => {
+    forgetDiskRoute();
     getVersion().then((v) => setAppVersion(v));
     //   window.electron.app
     // setAppVersion(window.electron.appInfo().version)

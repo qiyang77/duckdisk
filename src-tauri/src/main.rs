@@ -47,11 +47,13 @@ fn main() {
             read_cached_scan_result,
             has_cached_scan_index,
             clear_cached_scan_result,
+            refresh_scan_path,
             get_onedrive_state,
             connect_onedrive_account,
             disconnect_onedrive_account,
             start_onedrive_scan,
             read_onedrive_scan_result,
+            refresh_onedrive_item,
             delete_onedrive_items,
             check_for_updates,
             open_full_disk_access_settings,
@@ -161,6 +163,16 @@ fn clear_cached_scan_result(
 }
 
 #[tauri::command]
+async fn refresh_scan_path(
+    app_handle: tauri::AppHandle,
+    scan_path: String,
+    target_path: String,
+    ratio: String,
+) -> Result<String, String> {
+    scan::refresh_path(&app_handle, &scan_path, &target_path, &ratio).await
+}
+
+#[tauri::command]
 fn get_onedrive_state(app_handle: tauri::AppHandle) -> Result<onedrive::OneDriveState, String> {
     onedrive::get_state(&app_handle)
 }
@@ -192,6 +204,15 @@ fn start_onedrive_scan(
 #[tauri::command]
 fn read_onedrive_scan_result(path: String) -> Result<String, String> {
     onedrive::read_scan_result(&path)
+}
+
+#[tauri::command]
+async fn refresh_onedrive_item(
+    app_handle: tauri::AppHandle,
+    account_id: String,
+    item_id: String,
+) -> Result<String, String> {
+    onedrive::refresh_item(&app_handle, &account_id, &item_id).await
 }
 
 #[tauri::command]

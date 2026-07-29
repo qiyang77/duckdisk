@@ -13,7 +13,7 @@ The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
 Website: https://qiyang77.github.io/duckdisk/
 
-> **New in v0.5.4: safer, more resilient OneDrive scans.** DuckDisk explains macOS Keychain access before scanning, automatically rebuilds expired Microsoft Graph delta indexes, and displays local and OneDrive capacities using 1024-based units.
+> **New in v0.5.5: resumable scans and targeted refresh.** Long OneDrive scans now survive token expiry and App restarts, Reload reconnects to the active scan instead of starting over, and the new result context menu can refresh one local or OneDrive item in place. OneDrive deletions also retry transient Graph failures and show the real failure reason.
 
 ## Screenshots
 

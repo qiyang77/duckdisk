@@ -630,12 +630,13 @@ dependencies = [
 
 [[package]]
 name = "duckdisk-tauri"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "cocoa",
  "keyring",
  "oauth2",
  "objc",
+ "once_cell",
  "raw-window-handle",
  "regex",
  "reqwest",

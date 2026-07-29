@@ -59,6 +59,10 @@ body {
   animation: progress-shimmer 1.4s linear infinite;
 }
 
+.progress-indeterminate {
+  animation: progress-indeterminate 1.25s ease-in-out infinite;
+}
+
 .duck-scan-stage {
   position: relative;
   width: 260px;
@@ -98,6 +102,18 @@ body {
   }
   to {
     background-position: 0 0;
+  }
+}
+
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-105%);
+  }
+  50% {
+    transform: translateX(106%);
+  }
+  100% {
+    transform: translateX(315%);
   }
 }
 

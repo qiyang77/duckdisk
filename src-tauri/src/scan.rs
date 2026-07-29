@@ -4,13 +4,18 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::Mutex;
 use tauri::api::process::{Command as TauriCommand, CommandEvent};
 use tauri::Manager;
 
 use crate::MyState;
+
+static ACTIVE_INCREMENTAL_SCANS: Lazy<Mutex<HashSet<String>>> =
+    Lazy::new(|| Mutex::new(HashSet::new()));
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,6 +90,16 @@ pub fn start(
     let ratio_arg = ["--min-ratio=", ratio.as_str()].join("");
 
     if use_cache {
+        let scan_key = format!("{path}\n{ratio}");
+        let inserted = ACTIVE_INCREMENTAL_SCANS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(scan_key.clone());
+        if !inserted {
+            app_handle.emit_all("scan_incremental", ()).ok();
+            return Ok(());
+        }
+
         tauri::async_runtime::spawn(async move {
             match incremental_scan(&app_handle, &path, &ratio, &ratio_arg).await {
                 Ok((result_path, error_report)) => match write_scan_error_report(&error_report) {
@@ -112,6 +127,10 @@ pub fn start(
                     app_handle.emit_all("scan_failed", err).ok();
                 }
             }
+            ACTIVE_INCREMENTAL_SCANS
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(&scan_key);
         });
         return Ok(());
     }
@@ -451,6 +470,56 @@ async fn incremental_scan(
         .map_err(|err| err.to_string())
 }
 
+pub async fn refresh_path(
+    app_handle: &tauri::AppHandle,
+    scan_path: &str,
+    target_path: &str,
+    ratio: &str,
+) -> Result<String, String> {
+    let scan_root = Path::new(scan_path);
+    let target = Path::new(target_path);
+    if !target.starts_with(scan_root) {
+        return Err("The selected item is outside the current scan".to_string());
+    }
+    if !target.exists() {
+        return Err("The selected item no longer exists".to_string());
+    }
+
+    let ratio_arg = format!("--min-ratio={ratio}");
+    let (scan_json, _) =
+        run_pdu_for_paths(app_handle, &ratio_arg, &[target_path.to_string()]).await?;
+    let refreshed =
+        scan_json.ok_or_else(|| "The selected item could not be scanned".to_string())?;
+    let refreshed_content = serde_json::to_string(&refreshed).map_err(|err| err.to_string())?;
+
+    let cached_path = cache_path(app_handle, scan_path, ratio)?;
+    if target == scan_root {
+        write_cached_result(app_handle, scan_path, ratio, &refreshed_content)?;
+        return Ok(refreshed_content);
+    }
+
+    if cached_path.exists() {
+        let cached_content = fs::read_to_string(&cached_path).map_err(|err| err.to_string())?;
+        let mut cached_json: Value =
+            serde_json::from_str(&cached_content).map_err(|err| err.to_string())?;
+        let refreshed_tree = refreshed
+            .get("tree")
+            .ok_or_else(|| "Refreshed scan has no tree".to_string())?;
+        let cached_tree = cached_json
+            .get_mut("tree")
+            .ok_or_else(|| "Cached scan has no tree".to_string())?;
+
+        if !replace_cached_subtree(cached_tree, scan_root, target, refreshed_tree) {
+            return Err("The selected item is no longer present in the cached scan".to_string());
+        }
+        recalculate_tree_sizes(cached_tree);
+        let merged_content = serde_json::to_string(&cached_json).map_err(|err| err.to_string())?;
+        write_cached_result(app_handle, scan_path, ratio, &merged_content)?;
+    }
+
+    Ok(refreshed_content)
+}
+
 async fn run_pdu_for_paths(
     app_handle: &tauri::AppHandle,
     ratio_arg: &str,
@@ -508,6 +577,62 @@ async fn run_pdu_for_paths(
         .map(|content| serde_json::from_str(&content).map_err(|err| err.to_string()))
         .transpose()?;
     Ok((parsed, error_report))
+}
+
+fn replace_cached_subtree(
+    node: &mut Value,
+    node_path: &Path,
+    target_path: &Path,
+    refreshed_tree: &Value,
+) -> bool {
+    let Some(children) = node.get_mut("children").and_then(Value::as_array_mut) else {
+        return false;
+    };
+
+    for child in children {
+        let Some(name) = child.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let child_path = if Path::new(name).is_absolute() {
+            PathBuf::from(name)
+        } else {
+            node_path.join(name)
+        };
+
+        if child_path == target_path {
+            let preserved_name = child["name"].clone();
+            *child = refreshed_tree.clone();
+            child["name"] = preserved_name;
+            return true;
+        }
+        if target_path.starts_with(&child_path)
+            && replace_cached_subtree(child, &child_path, target_path, refreshed_tree)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn recalculate_tree_sizes(node: &mut Value) -> u64 {
+    let child_sizes = node
+        .get_mut("children")
+        .and_then(Value::as_array_mut)
+        .map(|children| {
+            children
+                .iter_mut()
+                .map(recalculate_tree_sizes)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    if child_sizes.is_empty() {
+        return tree_size(node);
+    }
+
+    let size = child_sizes.into_iter().sum::<u64>();
+    node["size"] = Value::from(size);
+    size
 }
 
 fn merge_changed_children(
@@ -840,4 +965,46 @@ fn scan_targets(path: &str) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_else(|_| vec![path.to_string()])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn replaces_nested_cached_subtree_and_recalculates_sizes() {
+        let mut root = json!({
+            "name": "(total)",
+            "size": 15,
+            "children": [{
+                "name": "/Users",
+                "size": 10,
+                "children": [{
+                    "name": "qi",
+                    "size": 10,
+                    "children": []
+                }]
+            }, {
+                "name": "/Applications",
+                "size": 5,
+                "children": []
+            }]
+        });
+        let refreshed = json!({
+            "name": "/Users/qi",
+            "size": 30,
+            "children": []
+        });
+
+        assert!(replace_cached_subtree(
+            &mut root,
+            Path::new("/"),
+            Path::new("/Users/qi"),
+            &refreshed
+        ));
+        assert_eq!(root["children"][0]["children"][0]["name"], "qi");
+        assert_eq!(recalculate_tree_sizes(&mut root), 35);
+        assert_eq!(root["size"], 35);
+    }
 }

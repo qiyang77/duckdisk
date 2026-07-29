@@ -1,4 +1,4 @@
-use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
+use std::collections::{hash_map::DefaultHasher, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{ErrorKind, Read, Write};
@@ -13,9 +13,11 @@ use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, CsrfToken, PkceCodeChallenge, RedirectUrl, RefreshToken,
     Scope, TokenResponse, TokenUrl,
 };
+use once_cell::sync::Lazy;
 use reqwest::{Client, StatusCode};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::sync::Mutex;
 use tauri::Manager;
 use url::Url;
 
@@ -23,6 +25,25 @@ const GRAPH_ROOT: &str = "https://graph.microsoft.com/v1.0";
 const KEYCHAIN_SERVICE: &str = "com.duckdisk.dev.onedrive";
 const CACHE_VERSION: &str = "duckdisk-onedrive-cache-v1";
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
+const ACCESS_TOKEN_REFRESH_INTERVAL: Duration = Duration::from_secs(45 * 60);
+const CHECKPOINT_ITEM_INTERVAL: u64 = 20_000;
+
+#[derive(Clone, Copy)]
+enum ActiveScanPhase {
+    Full,
+    Incremental,
+    Finalizing,
+}
+
+#[derive(Clone, Default)]
+struct ActiveScan {
+    items: u64,
+    total: u64,
+    phase: Option<ActiveScanPhase>,
+}
+
+static ACTIVE_SCANS: Lazy<Mutex<HashMap<String, ActiveScan>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,6 +87,12 @@ struct OneDriveCache {
     account_id: String,
     root_id: String,
     delta_link: String,
+    #[serde(default)]
+    next_link: String,
+    #[serde(default)]
+    checkpoint_items: u64,
+    #[serde(default)]
+    checkpoint_bytes: u64,
     items: HashMap<String, CachedItem>,
 }
 
@@ -124,6 +151,7 @@ struct DeltaPage {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ScanStatusPayload {
+    account_id: String,
     items: u64,
     total: u64,
     operation_not_permitted: u64,
@@ -135,8 +163,22 @@ struct ScanStatusPayload {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CompletedPayload {
+    account_id: String,
     path: String,
     errors_path: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountPayload {
+    account_id: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FailedPayload {
+    account_id: String,
+    message: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -249,13 +291,31 @@ pub fn start_scan(
         return Err("OneDrive account is not connected".to_string());
     }
 
+    let active_scan = {
+        let mut scans = ACTIVE_SCANS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(scan) = scans.get(&account_id) {
+            Some(scan.clone())
+        } else {
+            scans.insert(account_id.clone(), ActiveScan::default());
+            None
+        }
+    };
+
+    if let Some(scan) = active_scan {
+        replay_active_scan(&app_handle, &account_id, &scan);
+        return Ok(());
+    }
+
     tauri::async_runtime::spawn(async move {
         match scan_account(&app_handle, &account_id, force_full).await {
             Ok(path) => {
                 app_handle
                     .emit_all(
-                        "scan_completed",
+                        "onedrive_scan_completed",
                         CompletedPayload {
+                            account_id: account_id.clone(),
                             path: path.display().to_string(),
                             errors_path: String::new(),
                         },
@@ -263,9 +323,21 @@ pub fn start_scan(
                     .ok();
             }
             Err(err) => {
-                app_handle.emit_all("scan_failed", err).ok();
+                app_handle
+                    .emit_all(
+                        "onedrive_scan_failed",
+                        FailedPayload {
+                            account_id: account_id.clone(),
+                            message: err,
+                        },
+                    )
+                    .ok();
             }
         }
+        ACTIVE_SCANS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&account_id);
     });
     Ok(())
 }
@@ -283,6 +355,102 @@ pub fn read_scan_result(path: &str) -> Result<String, String> {
         return Err("Refusing to read OneDrive result outside the temporary directory".to_string());
     }
     fs::read_to_string(path).map_err(|err| err.to_string())
+}
+
+pub async fn refresh_item(
+    app_handle: &tauri::AppHandle,
+    account_id: &str,
+    item_id: &str,
+) -> Result<String, String> {
+    if !read_accounts(app_handle)?
+        .iter()
+        .any(|account| account.id == account_id)
+    {
+        return Err("OneDrive account is not connected".to_string());
+    }
+
+    {
+        let mut scans = ACTIVE_SCANS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if scans.contains_key(account_id) {
+            return Err(
+                "Wait for the current OneDrive scan to finish before refreshing this item."
+                    .to_string(),
+            );
+        }
+        scans.insert(account_id.to_string(), ActiveScan::default());
+    }
+
+    let result = refresh_item_inner(app_handle, account_id, item_id).await;
+    ACTIVE_SCANS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(account_id);
+    result
+}
+
+async fn refresh_item_inner(
+    app_handle: &tauri::AppHandle,
+    account_id: &str,
+    item_id: &str,
+) -> Result<String, String> {
+    let path = cache_path(app_handle, account_id)?;
+    let mut cache = read_cache(&path, account_id).ok_or_else(|| {
+        "Complete a OneDrive scan before refreshing an individual item.".to_string()
+    })?;
+    if cache.delta_link.is_empty() {
+        return Err(
+            "Complete the current OneDrive scan before refreshing an individual item.".to_string(),
+        );
+    }
+    if !cache.items.contains_key(item_id) {
+        return Err("The selected OneDrive item is not present in the cache.".to_string());
+    }
+
+    let access_token = refresh_access_token(account_id).await?;
+    let http = Client::new();
+    let selected: GraphItem = graph_get(
+        &http,
+        &access_token,
+        &format!(
+            "{}?$select=id,name,size,parentReference,folder,file",
+            drive_item_url(account_id, item_id)?
+        ),
+    )
+    .await?;
+    let selected_is_folder = selected.folder.is_some();
+
+    remove_cached_subtree(&mut cache, item_id);
+    apply_delta_item(&mut cache, selected);
+
+    let mut folders = VecDeque::new();
+    if selected_is_folder {
+        folders.push_back(item_id.to_string());
+    }
+
+    while let Some(folder_id) = folders.pop_front() {
+        let mut next_url = format!(
+            "{}/children?$select=id,name,size,parentReference,folder,file&$top=200",
+            drive_item_url(account_id, &folder_id)?
+        );
+        loop {
+            let page: DeltaPage = graph_get(&http, &access_token, &next_url).await?;
+            for item in page.value {
+                if item.folder.is_some() {
+                    folders.push_back(item.id.clone());
+                }
+                apply_delta_item(&mut cache, item);
+            }
+            match page.next_link {
+                Some(next) => next_url = next,
+                None => break,
+            }
+        }
+    }
+
+    write_cache(&path, &cache)?;
+    build_item_json(&cache, item_id)
 }
 
 pub async fn delete_items(
@@ -309,17 +477,34 @@ pub async fn delete_items(
         );
     }
 
-    let access_token = refresh_access_token(account_id).await?;
+    let mut access_token = refresh_access_token(account_id).await?;
     let http = Client::new();
     let total = item_ids.len() as u64;
     let mut deleted_ids = Vec::new();
     let mut failures = Vec::new();
 
     for (index, item_id) in item_ids.into_iter().enumerate() {
-        let result = match drive_item_url(account_id, &item_id) {
+        let mut result = match drive_item_url(account_id, &item_id) {
             Ok(url) => graph_delete(&http, &access_token, &url).await,
             Err(err) => Err(err),
         };
+        if result
+            .as_ref()
+            .err()
+            .map(|message| is_authentication_error(message))
+            .unwrap_or(false)
+        {
+            result = match refresh_access_token(account_id).await {
+                Ok(refreshed_token) => {
+                    access_token = refreshed_token;
+                    match drive_item_url(account_id, &item_id) {
+                        Ok(url) => graph_delete(&http, &access_token, &url).await,
+                        Err(err) => Err(err),
+                    }
+                }
+                Err(err) => Err(err),
+            };
+        }
         match result {
             Ok(()) => deleted_ids.push(item_id),
             Err(message) => failures.push(OneDriveDeleteFailure { item_id, message }),
@@ -368,7 +553,8 @@ async fn scan_account(
     account_id: &str,
     force_full: bool,
 ) -> Result<PathBuf, String> {
-    let access_token = refresh_access_token(account_id).await?;
+    let mut access_token = refresh_access_token(account_id).await?;
+    let mut access_token_refreshed_at = Instant::now();
     let http = Client::new();
     let drive: GraphDrive = graph_get(
         &http,
@@ -384,46 +570,87 @@ async fn scan_account(
     let path = cache_path(app_handle, account_id)?;
     let mut cache = if !force_full {
         if let Some(cache) = read_cache(&path, account_id) {
-            app_handle.emit_all("scan_incremental", ()).ok();
+            if cache.delta_link.is_empty() {
+                emit_scan_phase(app_handle, account_id, ActiveScanPhase::Full);
+            } else {
+                emit_scan_phase(app_handle, account_id, ActiveScanPhase::Incremental);
+            }
             cache
         } else {
+            emit_scan_phase(app_handle, account_id, ActiveScanPhase::Full);
             create_empty_cache(&http, &access_token, account_id).await?
         }
     } else {
+        emit_scan_phase(app_handle, account_id, ActiveScanPhase::Full);
         create_empty_cache(&http, &access_token, account_id).await?
     };
 
-    let mut next_url = if cache.delta_link.is_empty() {
+    let mut next_url = if !cache.next_link.is_empty() {
+        cache.next_link.clone()
+    } else if cache.delta_link.is_empty() {
         initial_delta_url()
     } else {
         cache.delta_link.clone()
     };
     let mut can_restart_full = !cache.delta_link.is_empty();
-    let mut changed_items = 0_u64;
-    let mut changed_bytes = 0_u64;
+    let mut changed_items = cache.checkpoint_items;
+    let mut changed_bytes = cache.checkpoint_bytes;
+    let mut last_checkpoint_items = changed_items;
+    let mut authentication_retried = false;
+
+    if cache.next_link.is_empty() {
+        cache.next_link = next_url.clone();
+        write_cache(&path, &cache)?;
+    } else {
+        emit_scan_status(app_handle, account_id, changed_items, changed_bytes);
+    }
 
     loop {
-        let page: DeltaPage = match graph_get(&http, &access_token, &next_url).await {
-            Ok(page) => page,
-            Err(err) if can_restart_full && is_delta_resync_error(&err) => {
-                fs::remove_file(&path).ok();
-                cache = create_empty_cache(&http, &access_token, account_id).await?;
-                next_url = initial_delta_url();
-                can_restart_full = false;
-                changed_items = 0;
-                changed_bytes = 0;
-                emit_scan_status(app_handle, 0, 0);
-                app_handle.emit_all("scan_full", ()).ok();
-                continue;
-            }
-            Err(err) if is_delta_resync_error(&err) => {
-                return Err(
-                    "OneDrive could not restart its change index. Use Clean Cache & Rescan."
+        if access_token_refreshed_at.elapsed() >= ACCESS_TOKEN_REFRESH_INTERVAL {
+            access_token = refresh_access_token(account_id).await?;
+            access_token_refreshed_at = Instant::now();
+            authentication_retried = false;
+        }
+
+        let page: DeltaPage =
+            match graph_get(&http, &access_token, &next_url).await {
+                Ok(page) => {
+                    authentication_retried = false;
+                    page
+                }
+                Err(err) if is_authentication_error(&err) && !authentication_retried => {
+                    access_token = refresh_access_token(account_id).await?;
+                    access_token_refreshed_at = Instant::now();
+                    authentication_retried = true;
+                    continue;
+                }
+                Err(err) if is_authentication_error(&err) => return Err(
+                    "Microsoft sign-in expired during the scan. Reconnect OneDrive and try again."
                         .to_string(),
-                )
-            }
-            Err(err) => return Err(err),
-        };
+                ),
+                Err(err) if can_restart_full && is_delta_resync_error(&err) => {
+                    fs::remove_file(&path).ok();
+                    cache = create_empty_cache(&http, &access_token, account_id).await?;
+                    next_url = initial_delta_url();
+                    cache.next_link = next_url.clone();
+                    write_cache(&path, &cache)?;
+                    can_restart_full = false;
+                    changed_items = 0;
+                    changed_bytes = 0;
+                    last_checkpoint_items = 0;
+                    authentication_retried = false;
+                    emit_scan_status(app_handle, account_id, 0, 0);
+                    emit_scan_phase(app_handle, account_id, ActiveScanPhase::Full);
+                    continue;
+                }
+                Err(err) if is_delta_resync_error(&err) => {
+                    return Err(
+                        "OneDrive could not restart its change index. Use Clean Cache & Rescan."
+                            .to_string(),
+                    )
+                }
+                Err(err) => return Err(err),
+            };
         for item in page.value {
             changed_items += 1;
             if item.folder.is_none() && item.deleted.is_none() {
@@ -431,20 +658,30 @@ async fn scan_account(
             }
             apply_delta_item(&mut cache, item);
         }
-        emit_scan_status(app_handle, changed_items, changed_bytes);
+        emit_scan_status(app_handle, account_id, changed_items, changed_bytes);
 
         if let Some(next) = page.next_link {
+            cache.next_link = next.clone();
+            cache.checkpoint_items = changed_items;
+            cache.checkpoint_bytes = changed_bytes;
+            if changed_items.saturating_sub(last_checkpoint_items) >= CHECKPOINT_ITEM_INTERVAL {
+                write_cache(&path, &cache)?;
+                last_checkpoint_items = changed_items;
+            }
             next_url = next;
             continue;
         }
         cache.delta_link = page
             .delta_link
             .ok_or_else(|| "OneDrive scan ended without a delta token".to_string())?;
+        cache.next_link.clear();
+        cache.checkpoint_items = 0;
+        cache.checkpoint_bytes = 0;
         break;
     }
 
     write_cache(&path, &cache)?;
-    app_handle.emit_all("scan_finalizing", ()).ok();
+    emit_scan_phase(app_handle, account_id, ActiveScanPhase::Finalizing);
     let account = read_accounts(app_handle)?
         .into_iter()
         .find(|account| account.id == account_id)
@@ -481,6 +718,9 @@ async fn create_empty_cache(
         account_id: account_id.to_string(),
         root_id,
         delta_link: String::new(),
+        next_link: String::new(),
+        checkpoint_items: 0,
+        checkpoint_bytes: 0,
         items,
     })
 }
@@ -543,6 +783,22 @@ fn build_scan_json(cache: &OneDriveCache, account: &OneDriveAccount) -> Result<S
         }
     }))
     .map_err(|err| err.to_string())
+}
+
+fn build_item_json(cache: &OneDriveCache, item_id: &str) -> Result<String, String> {
+    let mut child_ids: HashMap<String, Vec<String>> = HashMap::new();
+    for item in cache.items.values() {
+        if let Some(parent_id) = &item.parent_id {
+            child_ids
+                .entry(parent_id.clone())
+                .or_default()
+                .push(item.id.clone());
+        }
+    }
+
+    let node = build_node(item_id, cache, &child_ids, &mut HashSet::new())
+        .ok_or_else(|| "The refreshed OneDrive item could not be rebuilt.".to_string())?;
+    serde_json::to_string(&node).map_err(|err| err.to_string())
 }
 
 fn build_node(
@@ -641,23 +897,36 @@ fn is_delta_resync_error(message: &str) -> bool {
         || message.contains("resyncchangesuploaddifferences")
 }
 
+fn is_authentication_error(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("401 unauthorized") || message.contains("invalidauthenticationtoken")
+}
+
 async fn graph_delete(http: &Client, access_token: &str, url: &str) -> Result<(), String> {
     let mut attempts = 0;
     loop {
-        let response = http
-            .delete(url)
-            .bearer_auth(access_token)
-            .send()
-            .await
-            .map_err(|err| err.to_string())?;
+        let response = match http.delete(url).bearer_auth(access_token).send().await {
+            Ok(response) => response,
+            Err(err) if (err.is_connect() || err.is_timeout()) && attempts < 5 => {
+                attempts += 1;
+                tokio::time::sleep(Duration::from_secs(2_u64.pow(attempts).min(30))).await;
+                continue;
+            }
+            Err(err) => {
+                return Err(format!(
+                    "Could not reach Microsoft Graph while moving the item: {err}"
+                ))
+            }
+        };
         let status = response.status();
         if status == StatusCode::NO_CONTENT || status == StatusCode::NOT_FOUND {
             return Ok(());
         }
-        if status == StatusCode::TOO_MANY_REQUESTS || status == StatusCode::SERVICE_UNAVAILABLE {
+        if is_retryable_delete_status(status) {
             attempts += 1;
             if attempts > 5 {
-                return Err(format!("Microsoft Graph remained unavailable ({status})"));
+                let body = response.text().await.unwrap_or_default();
+                return Err(graph_error_message(status, &body));
             }
             let delay = response
                 .headers()
@@ -669,7 +938,32 @@ async fn graph_delete(http: &Client, access_token: &str, url: &str) -> Result<()
             continue;
         }
         let body = response.text().await.unwrap_or_default();
-        return Err(format!("Microsoft Graph returned {status}: {body}"));
+        return Err(graph_error_message(status, &body));
+    }
+}
+
+fn is_retryable_delete_status(status: StatusCode) -> bool {
+    matches!(
+        status.as_u16(),
+        408 | 409 | 423 | 429 | 500 | 502 | 503 | 504
+    )
+}
+
+fn graph_error_message(status: StatusCode, body: &str) -> String {
+    let message = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .filter(|message| !message.trim().is_empty());
+
+    match message {
+        Some(message) => format!("Microsoft Graph returned {status}: {message}"),
+        None => format!("Microsoft Graph returned {status}"),
     }
 }
 
@@ -918,7 +1212,7 @@ fn read_cache(path: &Path, account_id: &str) -> Option<OneDriveCache> {
     let cache: OneDriveCache = serde_json::from_str(&content).ok()?;
     (cache.version == CACHE_VERSION
         && cache.account_id == account_id
-        && !cache.delta_link.is_empty())
+        && (!cache.delta_link.is_empty() || !cache.next_link.is_empty()))
     .then_some(cache)
 }
 
@@ -927,7 +1221,9 @@ fn write_cache(path: &Path, cache: &OneDriveCache) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
     let content = serde_json::to_string(cache).map_err(|err| err.to_string())?;
-    fs::write(path, content).map_err(|err| err.to_string())
+    let temporary_path = path.with_extension("json.tmp");
+    fs::write(&temporary_path, content).map_err(|err| err.to_string())?;
+    fs::rename(temporary_path, path).map_err(|err| err.to_string())
 }
 
 fn initial_delta_url() -> String {
@@ -949,11 +1245,20 @@ fn write_scan_result(content: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn emit_scan_status(app_handle: &tauri::AppHandle, items: u64, total: u64) {
+fn emit_scan_status(app_handle: &tauri::AppHandle, account_id: &str, items: u64, total: u64) {
+    if let Some(scan) = ACTIVE_SCANS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get_mut(account_id)
+    {
+        scan.items = items;
+        scan.total = total;
+    }
     app_handle
         .emit_all(
-            "scan_status",
+            "onedrive_scan_status",
             ScanStatusPayload {
+                account_id: account_id.to_string(),
                 items,
                 total,
                 operation_not_permitted: 0,
@@ -963,6 +1268,46 @@ fn emit_scan_status(app_handle: &tauri::AppHandle, items: u64, total: u64) {
             },
         )
         .ok();
+}
+
+fn emit_scan_phase(app_handle: &tauri::AppHandle, account_id: &str, phase: ActiveScanPhase) {
+    if let Some(scan) = ACTIVE_SCANS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get_mut(account_id)
+    {
+        scan.phase = Some(phase);
+    }
+    app_handle
+        .emit_all(
+            scan_phase_event(phase),
+            AccountPayload {
+                account_id: account_id.to_string(),
+            },
+        )
+        .ok();
+}
+
+fn replay_active_scan(app_handle: &tauri::AppHandle, account_id: &str, scan: &ActiveScan) {
+    if let Some(phase) = scan.phase {
+        app_handle
+            .emit_all(
+                scan_phase_event(phase),
+                AccountPayload {
+                    account_id: account_id.to_string(),
+                },
+            )
+            .ok();
+    }
+    emit_scan_status(app_handle, account_id, scan.items, scan.total);
+}
+
+fn scan_phase_event(phase: ActiveScanPhase) -> &'static str {
+    match phase {
+        ActiveScanPhase::Full => "onedrive_scan_full",
+        ActiveScanPhase::Incremental => "onedrive_scan_incremental",
+        ActiveScanPhase::Finalizing => "onedrive_scan_finalizing",
+    }
 }
 
 #[cfg(test)]
@@ -996,6 +1341,9 @@ mod tests {
             account_id: "drive".to_string(),
             root_id: "root".to_string(),
             delta_link: "delta".to_string(),
+            next_link: String::new(),
+            checkpoint_items: 0,
+            checkpoint_bytes: 0,
             items,
         };
         let account = OneDriveAccount {
@@ -1015,6 +1363,11 @@ mod tests {
             result["tree"]["children"][0]["children"][0]["cloudId"],
             "file"
         );
+        let folder: Value =
+            serde_json::from_str(&build_item_json(&cache, "folder").unwrap()).unwrap();
+        assert_eq!(folder["cloudId"], "folder");
+        assert_eq!(folder["size"], 42);
+        assert_eq!(folder["children"][0]["cloudId"], "file");
     }
 
     #[test]
@@ -1024,6 +1377,9 @@ mod tests {
             account_id: "drive".to_string(),
             root_id: "root".to_string(),
             delta_link: "delta".to_string(),
+            next_link: String::new(),
+            checkpoint_items: 0,
+            checkpoint_bytes: 0,
             items: HashMap::from([(
                 "file".to_string(),
                 item("file", Some("root"), "old.txt", 12, false),
@@ -1050,6 +1406,9 @@ mod tests {
             account_id: "drive".to_string(),
             root_id: "root".to_string(),
             delta_link: "delta".to_string(),
+            next_link: String::new(),
+            checkpoint_items: 0,
+            checkpoint_bytes: 0,
             items: HashMap::from([
                 ("root".to_string(), item("root", None, "root", 0, true)),
                 (
@@ -1086,5 +1445,58 @@ mod tests {
         assert!(!is_delta_resync_error(
             "Microsoft Graph remained unavailable (429 Too Many Requests)"
         ));
+    }
+
+    #[test]
+    fn recognizes_authentication_errors() {
+        assert!(is_authentication_error(
+            r#"Microsoft Graph returned 401 Unauthorized: {"error":{"code":"InvalidAuthenticationToken"}}"#
+        ));
+        assert!(!is_authentication_error(
+            "Microsoft Graph returned 403 Forbidden"
+        ));
+    }
+
+    #[test]
+    fn retries_only_transient_delete_statuses() {
+        for status in [408, 409, 423, 429, 500, 502, 503, 504] {
+            assert!(is_retryable_delete_status(
+                StatusCode::from_u16(status).unwrap()
+            ));
+        }
+        for status in [400, 401, 403, 404] {
+            assert!(!is_retryable_delete_status(
+                StatusCode::from_u16(status).unwrap()
+            ));
+        }
+    }
+
+    #[test]
+    fn extracts_graph_delete_error_message() {
+        assert_eq!(
+            graph_error_message(
+                StatusCode::LOCKED,
+                r#"{"error":{"message":"The resource is temporarily locked."}}"#
+            ),
+            "Microsoft Graph returned 423 Locked: The resource is temporarily locked."
+        );
+    }
+
+    #[test]
+    fn reads_legacy_cache_without_checkpoint_fields() {
+        let cache: OneDriveCache = serde_json::from_str(
+            r#"{
+                "version":"duckdisk-onedrive-cache-v1",
+                "accountId":"drive",
+                "rootId":"root",
+                "deltaLink":"delta",
+                "items":{}
+            }"#,
+        )
+        .expect("legacy cache");
+
+        assert!(cache.next_link.is_empty());
+        assert_eq!(cache.checkpoint_items, 0);
+        assert_eq!(cache.checkpoint_bytes, 0);
     }
 }
