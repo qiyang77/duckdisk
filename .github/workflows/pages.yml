@@ -1,4 +1,4 @@
-name: Pages
+name: Deploy website
 
 on:
   push:
@@ -11,32 +11,71 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
+  group: duckdisk-website
   cancel-in-progress: true
 
 jobs:
   deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
+      - name: Configure deployment key
+        env:
+          DEPLOY_KEY: ${{ secrets.DUCKDISK_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/duckdisk_deploy"
+          chmod 600 "$HOME/.ssh/duckdisk_deploy"
+          printf '%s\n' \
+            '46.225.76.57 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG78CD3VfT3oCEp7d5z0wUm/HIgR+jsf5xW/thegKn/9' \
+            > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs
+      - name: Deploy static site
+        env:
+          DEPLOY_HOST: 46.225.76.57
+          DEPLOY_USER: duckdeploy
+        run: |
+          set -euo pipefail
+          release="$(date -u +%Y%m%d-%H%M%S)-${GITHUB_SHA::7}"
+          destination="/var/www/duckdisk/releases/$release"
+          ssh -i "$HOME/.ssh/duckdisk_deploy" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "mkdir -p '$destination'"
+          rsync -az --delete --exclude '.DS_Store' \
+            -e "ssh -i $HOME/.ssh/duckdisk_deploy" \
+            docs/ "$DEPLOY_USER@$DEPLOY_HOST:$destination/"
+          ssh -i "$HOME/.ssh/duckdisk_deploy" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "set -eu; \
+             test -s '$destination/index.html'; \
+             test -s '$destination/styles.css'; \
+             test -s '$destination/site.js'; \
+             find '$destination' -type d -exec chmod 755 {} +; \
+             find '$destination' -type f -exec chmod 644 {} +; \
+             ln -sfn '$destination' /var/www/duckdisk/current.next; \
+             mv -Tf /var/www/duckdisk/current.next /var/www/duckdisk/current; \
+             printf 'Deployed %s\n' '$destination'"
 
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5
+      - name: Verify production
+        run: |
+          set -euo pipefail
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error \
+              "https://duckdisk.com/?deploy=$GITHUB_SHA" \
+              --output /tmp/duckdisk-home.html \
+              && grep -q 'See where your storage went' /tmp/duckdisk-home.html; then
+              echo "https://duckdisk.com is serving the new release"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Production verification timed out" >&2
+          exit 1
