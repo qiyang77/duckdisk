@@ -2,7 +2,7 @@
 
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 [![release](https://img.shields.io/github/v/release/qiyang77/duckdisk?label=release)](https://github.com/qiyang77/duckdisk/releases)
-[![website](https://img.shields.io/badge/website-duckdisk-blue)](https://qiyang77.github.io/duckdisk/)
+[![website](https://img.shields.io/badge/website-duckdisk-blue)](https://duckdisk.com/)
 ![platform](https://img.shields.io/badge/platform-macOS-black)
 ![arch](https://img.shields.io/badge/arch-arm64-lightgrey)
 ![stack](https://img.shields.io/badge/stack-Tauri%20%7C%20Rust%20%7C%20React-orange)
@@ -11,7 +11,7 @@
 
 The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
-Website: https://qiyang77.github.io/duckdisk/
+Website: https://duckdisk.com/
 
 > **New in v0.5.5: resumable scans and targeted refresh.** Long OneDrive scans now survive token expiry and App restarts, Reload reconnects to the active scan instead of starting over, and the new result context menu can refresh one local or OneDrive item in place. OneDrive deletions also retry transient Graph failures and show the real failure reason.
 
