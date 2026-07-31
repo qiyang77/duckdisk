@@ -12,6 +12,10 @@ import {
   readDiskRoute,
   rememberDiskRoute,
 } from "../diskRoute";
+import {
+  calculateVirtualRange,
+  TREE_ROW_HEIGHT,
+} from "../virtualRows";
 
 type ScanStatus = {
   items: number;
@@ -111,8 +115,10 @@ type ScanErrorReport = {
   records: ScanErrorRecord[];
 };
 
-const getChildren = (node?: DiskItem | null) =>
-  [...(node?.children || [])].sort((a, b) => (b.size || 0) - (a.size || 0));
+const getChildren = (node?: DiskItem | null) => node?.children || [];
+
+const sortChildrenBySize = (children: DiskItem[]) =>
+  children.sort((a, b) => (b.size || 0) - (a.size || 0));
 
 const isDirectory = (node: DiskItem) =>
   node.isDirectory || Boolean(node.children && node.children.length > 0);
@@ -275,17 +281,29 @@ const buildIndex = (root: DiskItem | null, deletedIds = new Set<string>()) => {
 
 const buildVisibleRows = (
   nodes: DiskItem[],
-  expandedIds: Set<string>,
-  depth = 0
+  expandedIds: Set<string>
 ): VisibleRow[] => {
-  return nodes.flatMap((node) => {
-    const row = { node, depth };
-    if (!expandedIds.has(node.id)) {
-      return [row];
+  const rows: VisibleRow[] = [];
+  const stack: VisibleRow[] = [];
+
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    stack.push({ node: nodes[index], depth: 0 });
+  }
+
+  while (stack.length) {
+    const row = stack.pop()!;
+    rows.push(row);
+    if (!expandedIds.has(row.node.id)) {
+      continue;
     }
 
-    return [row, ...buildVisibleRows(getChildren(node), expandedIds, depth + 1)];
-  });
+    const children = getChildren(row.node);
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      stack.push({ node: children[index], depth: row.depth + 1 });
+    }
+  }
+
+  return rows;
 };
 
 const buildExtensionStats = (node: DiskItem | null, deletedIds = new Set<string>()) => {
@@ -355,12 +373,14 @@ const replaceTreeNode = (
 
   return {
     ...root,
-    children: (root.children || []).map((child) =>
-      child.id === nodeId
-        ? replacement
-        : nodeId.startsWith(`${child.id}/`)
-        ? replaceTreeNode(child, nodeId, replacement)
-        : child
+    children: sortChildrenBySize(
+      (root.children || []).map((child) =>
+        child.id === nodeId
+          ? replacement
+          : nodeId.startsWith(`${child.id}/`)
+          ? replaceTreeNode(child, nodeId, replacement)
+          : child
+      )
     ),
   };
 };
@@ -377,6 +397,7 @@ const mapRefreshedTree = (raw: any, original: DiskItem): DiskItem => {
           walk(child, childNodeId(id, String(child.name || "(unnamed)")))
         )
       : [];
+    sortChildrenBySize(children);
     const size = Number(item.size || 0);
     return {
       ...item,
@@ -461,6 +482,8 @@ const Scanning = () => {
   const worker = useRef<Worker | null>(null);
   const dragSession = useRef<DragSession | null>(null);
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
+  const treeViewportRef = useRef<HTMLDivElement | null>(null);
+  const treeScrollFrameRef = useRef<number | null>(null);
   const suppressClickUntil = useRef(0);
   const [view, setView] = useState<"loading" | "disk">("loading");
   const [status, setStatus] = useState<ScanStatus | null>(null);
@@ -486,6 +509,10 @@ const Scanning = () => {
   const [refreshingNodeId, setRefreshingNodeId] = useState<string | null>(null);
   const [refreshNotice, setRefreshNotice] = useState<RefreshNotice | null>(null);
   const [isDeleteTargetActive, setDeleteTargetActive] = useState(false);
+  const [treeViewport, setTreeViewport] = useState({
+    scrollTop: 0,
+    height: 0,
+  });
   const [deleteState, setDeleteState] = useState<DeleteState>({
     isDeleting: false,
     total: 0,
@@ -499,6 +526,44 @@ const Scanning = () => {
       rememberDiskRoute(routeState);
     }
   }, [routeState]);
+
+  useEffect(() => {
+    const viewport = treeViewportRef.current;
+    if (!viewport || view !== "disk") {
+      return;
+    }
+
+    const updateViewport = () => {
+      setTreeViewport({
+        scrollTop: viewport.scrollTop,
+        height: viewport.clientHeight,
+      });
+    };
+    updateViewport();
+
+    const observer = new ResizeObserver(updateViewport);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [view]);
+
+  useEffect(
+    () => () => {
+      if (treeScrollFrameRef.current !== null) {
+        cancelAnimationFrame(treeScrollFrameRef.current);
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    const viewport = treeViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    viewport.scrollTop = 0;
+    setTreeViewport((current) => ({ ...current, scrollTop: 0 }));
+  }, [currentNode?.id]);
 
   useEffect(() => {
     const preventNativeContextMenu = (event: MouseEvent) => {
@@ -810,6 +875,19 @@ const Scanning = () => {
     () => buildVisibleRows(childRows, expandedIds),
     [childRows, expandedIds]
   );
+  const virtualRange = useMemo(
+    () =>
+      calculateVirtualRange(
+        rows.length,
+        treeViewport.scrollTop,
+        treeViewport.height
+      ),
+    [rows.length, treeViewport]
+  );
+  const virtualRows = useMemo(
+    () => rows.slice(virtualRange.start, virtualRange.end),
+    [rows, virtualRange.start, virtualRange.end]
+  );
   const extensionStats = useMemo(
     () => buildExtensionStats(currentNode, deletedIds),
     [currentNode, deletedIds]
@@ -831,6 +909,25 @@ const Scanning = () => {
   const topBlocks = childRows
     .filter((node) => !isDeletedPath(node.id, deletedIds))
     .slice(0, 20);
+  const treeColumnCount = isCloud ? 6 : 7;
+
+  const handleTreeScroll = () => {
+    if (treeScrollFrameRef.current !== null) {
+      return;
+    }
+
+    treeScrollFrameRef.current = requestAnimationFrame(() => {
+      treeScrollFrameRef.current = null;
+      const viewport = treeViewportRef.current;
+      if (!viewport) {
+        return;
+      }
+      setTreeViewport({
+        scrollTop: viewport.scrollTop,
+        height: viewport.clientHeight,
+      });
+    });
+  };
 
   const reveal = (node: DiskItem) => {
     if (isCloud) {
@@ -1256,10 +1353,17 @@ const Scanning = () => {
           <div className="border-b border-slate-800 px-3 py-2 text-xs font-semibold uppercase text-slate-400">
             Tree View
           </div>
-          <div className="min-h-0 flex-1 overflow-auto">
-            <table className="w-full border-collapse text-xs">
+          <div
+            ref={treeViewportRef}
+            onScroll={handleTreeScroll}
+            className="min-h-0 flex-1 overflow-auto"
+          >
+            <table
+              className="w-full border-collapse text-xs"
+              aria-rowcount={rows.length + (parentNode ? 1 : 0) + 1}
+            >
               <thead>
-                <tr>
+                <tr aria-rowindex={1}>
                   <TableHeader>Name</TableHeader>
                   <TableHeader>Parent %</TableHeader>
                   <TableHeader>Size</TableHeader>
@@ -1271,7 +1375,11 @@ const Scanning = () => {
               </thead>
               <tbody>
                 {parentNode && (
-                  <tr className="bg-slate-900/60 hover:bg-slate-800">
+                  <tr
+                    aria-rowindex={2}
+                    className="bg-slate-900/60 hover:bg-slate-800"
+                    style={{ height: TREE_ROW_HEIGHT }}
+                  >
                     <td className="border-b border-slate-800 px-2 py-1.5 font-medium text-slate-100">
                       <button
                         onClick={() => {
@@ -1303,7 +1411,16 @@ const Scanning = () => {
                     </NumberCell>
                   </tr>
                 )}
-                {rows.map(({ node, depth }, index) => {
+                {virtualRange.paddingTop > 0 && (
+                  <tr aria-hidden="true">
+                    <td
+                      colSpan={treeColumnCount}
+                      className="border-0 p-0"
+                      style={{ height: virtualRange.paddingTop }}
+                    />
+                  </tr>
+                )}
+                {virtualRows.map(({ node, depth }, index) => {
                   const deleted = isDeletedPath(node.id, deletedIds);
                   const effectiveStats = statsMap.get(node.id) || emptyStats;
                   const originalStats =
@@ -1330,7 +1447,13 @@ const Scanning = () => {
                   const expanded = expandedIds.has(node.id);
                   return (
                     <tr
-                      key={node.id || `${node.name}-${index}`}
+                      key={
+                        node.id ||
+                        `${node.name}-${virtualRange.start + index}`
+                      }
+                      aria-rowindex={
+                        virtualRange.start + index + (parentNode ? 3 : 2)
+                      }
                       onPointerDown={(event) => startPointerDrag(event, node, deleted)}
                       onContextMenu={(event) => {
                         event.preventDefault();
@@ -1344,18 +1467,19 @@ const Scanning = () => {
                           y: Math.min(event.clientY, window.innerHeight - 210),
                         });
                       }}
-                      style={
-                        deleted
+                      className={`select-none hover:bg-slate-900 ${
+                        deleted ? "bg-red-950/20 text-red-300" : ""
+                      }`}
+                      style={{
+                        height: TREE_ROW_HEIGHT,
+                        ...(deleted
                           ? {
                               textDecoration: "line-through",
                               textDecorationColor: "#f87171",
                               textDecorationThickness: "2px",
                             }
-                          : undefined
-                      }
-                      className={`select-none hover:bg-slate-900 ${
-                        deleted ? "bg-red-950/20 text-red-300" : ""
-                      }`}
+                          : {}),
+                      }}
                     >
                       <td
                         className={`max-w-[30rem] truncate border-b border-slate-800 px-2 py-1.5 ${
@@ -1418,6 +1542,15 @@ const Scanning = () => {
                     </tr>
                   );
                 })}
+                {virtualRange.paddingBottom > 0 && (
+                  <tr aria-hidden="true">
+                    <td
+                      colSpan={treeColumnCount}
+                      className="border-0 p-0"
+                      style={{ height: virtualRange.paddingBottom }}
+                    />
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

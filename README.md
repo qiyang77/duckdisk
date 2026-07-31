@@ -13,7 +13,7 @@ The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
 Website: https://duckdisk.com/
 
-> **New in v0.5.5: resumable scans and targeted refresh.** Long OneDrive scans now survive token expiry and App restarts, Reload reconnects to the active scan instead of starting over, and the new result context menu can refresh one local or OneDrive item in place. OneDrive deletions also retry transient Graph failures and show the real failure reason.
+> **New in v0.5.6: smooth large directories and clearer disk capacity.** Local and OneDrive result trees now render only the visible rows, so expanding directories with tens of thousands of items stays responsive. Local disk cards also show used space alongside total capacity.
 
 ## Screenshots
 
@@ -35,6 +35,7 @@ Website: https://duckdisk.com/
 - **Fast incremental cloud refreshes** using Microsoft Graph delta updates and a local metadata cache.
 - **OneDrive cleanup** that moves selected files and folders to the Recycle Bin.
 - **Dense tree view** with folder/file counts, sizes, allocated size, and parent percentage.
+- **Virtualized large directories** that keep local and OneDrive result tables responsive.
 - **Drag-to-delete** cleanup for local and OneDrive scan results.
 - File type summary with extension totals and percentages.
 - Finder integration for revealing files and folders.

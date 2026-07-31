@@ -12,7 +12,8 @@ const DiskItem = ({ disk }: any) => {
     { tc: "text-red-700", bg: "bg-red-600", from: 0.7, to: 1 },
   ];
 
-  const perc = (disk.totalSpace - disk.availableSpace) / disk.totalSpace;
+  const usedSpace = Math.max(0, disk.totalSpace - disk.availableSpace);
+  const perc = disk.totalSpace > 0 ? usedSpace / disk.totalSpace : 0;
   const xy: any = x.find((e) => perc > e.from && perc <= e.to);
 
   const icona = disk.isRemovable ? removableDriver : diskIcon;
@@ -23,7 +24,7 @@ const DiskItem = ({ disk }: any) => {
         navigate("/disk", {
           state: {
             disk: disk.sMountPoint,
-            used: disk.totalSpace - disk.availableSpace,
+            used: usedSpace,
             fullscan: true,
           },
         });
@@ -32,7 +33,7 @@ const DiskItem = ({ disk }: any) => {
         navigate("/disk", {
           state: {
             disk: disk.sMountPoint,
-            used: disk.totalSpace - disk.availableSpace,
+            used: usedSpace,
             fullscan: true,
           },
         });
@@ -46,10 +47,9 @@ const DiskItem = ({ disk }: any) => {
             {disk.name ? disk.name : "Local Disk"}{" "}
             <span className="text-xs">({disk.sMountPoint})</span>
             <br />
-            <span className=" text-sm font-medium mr-2 px-2.5 py-0.5 rounded bg-gray-700 text-gray-300">
-              {formatBytes(disk.totalSpace)}
+            <span className="text-sm font-medium text-slate-400">
+              {formatBytes(usedSpace)} of {formatBytes(disk.totalSpace)} used
             </span>
-            {/* <span className="opacity-60"></span> */}
           </span>
           <span className="text-sm font-medium text-right text-white">
             {(perc * 100).toFixed(0)}%<br />

@@ -13,6 +13,9 @@ const mapScanTree = (obj: any, parent: any = null): DiskItem => {
     obj.isDirectory = true;
     obj.value = obj.size;
     obj.children.forEach((child: DiskItem) => mapScanTree(child, obj));
+    obj.children.sort(
+      (a: DiskItem, b: DiskItem) => (b.size || 0) - (a.size || 0)
+    );
   }
 
   return obj;
