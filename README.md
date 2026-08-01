@@ -25,10 +25,6 @@ Website: https://duckdisk.com/
 
 ![DuckDisk drag-to-remove demo](docs/screenshots/drag-remove.gif)
 
-### Scan Results
-
-![DuckDisk scan results](docs/screenshots/scan-results.png)
-
 ## Features
 
 - **OneDrive cloud analysis** using file metadata only, without downloading file contents.
