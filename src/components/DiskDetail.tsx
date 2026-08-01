@@ -4,8 +4,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
 import { removeDir, removeFile } from "@tauri-apps/api/fs";
-import diskIcon from "../assets/harddisk.png";
-import duckIcon from "../assets/duck-scan.png";
+import * as d3 from "d3";
+import surfingDuck from "../assets/duck-disc-surf.png";
 import { formatBytes } from "../formatBytes";
 import {
   type DiskRouteState,
@@ -16,6 +16,21 @@ import {
   calculateVirtualRange,
   TREE_ROW_HEIGHT,
 } from "../virtualRows";
+import {
+  AlertTriangle,
+  ArrowUp,
+  ChevronDown,
+  ChevronRight,
+  File as FileIcon,
+  Folder as FolderIcon,
+  FolderOpen,
+  FolderUp,
+  RefreshCw,
+  RotateCcw,
+  ShieldCheck,
+  Trash2,
+  X,
+} from "lucide-react";
 
 type ScanStatus = {
   items: number;
@@ -47,6 +62,21 @@ type ExtensionStat = {
   type: string;
   size: number;
   files: number;
+};
+
+type TreemapDatum = {
+  node?: DiskItem;
+  size?: number;
+  children?: TreemapDatum[];
+};
+
+type TreemapBlock = {
+  node: DiskItem;
+  index: number;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
 };
 
 type VisibleRow = {
@@ -179,6 +209,22 @@ const colorForIndex = (index: number) => {
   return colors[index % colors.length];
 };
 
+const treemapColorForIndex = (index: number) => {
+  const colors = [
+    "#309fc5",
+    "#d18a35",
+    "#8b72ce",
+    "#48a374",
+    "#c85c66",
+    "#3d9992",
+    "#b99a38",
+    "#bb6f98",
+    "#4f86c4",
+    "#876fb4",
+  ];
+  return colors[index % colors.length];
+};
+
 const phaseLabel = (phase: ScanPhase, disk: string) => {
   switch (phase) {
     case "checkingCache":
@@ -209,7 +255,8 @@ const emptyScanErrorReport = {
   counts: emptyScanErrorCounts,
   records: [],
 };
-const oneDriveKeychainNoticeKey = "duckdisk-onedrive-keychain-notice-seen";
+const credentialNoticeKey = (source: string) =>
+  `duckdisk-${source}-keychain-notice-seen`;
 
 const totalScanIssues = (counts: ScanErrorCounts) =>
   counts.operationNotPermitted +
@@ -432,37 +479,41 @@ const removeNodes = (
 };
 
 const PercentBar = ({ percent }: { percent: number }) => (
-  <div className="relative h-5 min-w-[76px] overflow-hidden rounded-sm border border-slate-700 bg-slate-950">
+  <div className="data-percent">
     <div
-      className="absolute inset-y-0 left-0 bg-sky-500/70"
+      className="data-percent-fill"
       style={{ width: `${Math.max(1, Math.min(100, percent))}%` }}
     />
-    <div className="relative px-1 text-right text-xs tabular-nums text-slate-100">
+    <div className="data-percent-label">
       {percent.toFixed(1)}%
     </div>
   </div>
 );
 
 const TableHeader = ({ children }: { children: ReactNode }) => (
-  <th className="sticky top-0 z-10 border-b border-slate-700 bg-slate-900 px-2 py-2 text-left text-xs font-semibold uppercase text-slate-400">
+  <th className="data-header">
     {children}
   </th>
 );
 
 const NumberCell = ({ children }: { children: ReactNode }) => (
-  <td className="whitespace-nowrap border-b border-slate-800 px-2 py-1.5 text-right tabular-nums text-slate-200">
+  <td className="data-cell data-cell-number">
     {children}
   </td>
 );
 
 const ScanningDuck = () => (
   <div className="duck-scan-stage" aria-hidden="true">
-    <div className="duck-scan-disks">
-      <img src={diskIcon} className="duck-scan-disk" />
-      <img src={diskIcon} className="duck-scan-disk" />
-      <img src={diskIcon} className="duck-scan-disk" />
+    <div className="duck-scan-trail duck-scan-trail-back" />
+    <div className="duck-scan-trail duck-scan-trail-front" />
+    <div className="duck-file-wake">
+      <span className="duck-file-splash duck-file-splash-one" />
+      <span className="duck-file-splash duck-file-splash-two" />
+      <span className="duck-file-splash duck-file-splash-three" />
     </div>
-    <img src={duckIcon} className="duck-scan-duck" />
+    <div className="duck-scan-surfer">
+      <img src={surfingDuck} alt="" />
+    </div>
   </div>
 );
 
@@ -476,7 +527,30 @@ const Scanning = () => {
     source = "local",
     accountId = "",
   } = routeState || {};
-  const isCloud = source === "onedrive";
+  const isOneDrive = source === "onedrive";
+  const isGoogleDrive = source === "googledrive";
+  const isSsh = source === "ssh";
+  const isCloud = source !== "local";
+  const requiresKeychainApproval = isOneDrive || isGoogleDrive;
+  const canDelete = !isCloud || isOneDrive;
+  const canRefreshItem = !isCloud || isOneDrive;
+  const providerName = isOneDrive
+    ? "OneDrive"
+    : isGoogleDrive
+    ? "Google Drive"
+    : isSsh
+    ? "SSH"
+    : "Local disk";
+  const cloudCommandPrefix = isGoogleDrive
+    ? "google_drive"
+    : isSsh
+    ? "ssh"
+    : "onedrive";
+  const cloudEventPrefix = isGoogleDrive
+    ? "googledrive"
+    : isSsh
+    ? "ssh"
+    : "onedrive";
   const ratio = "0";
 
   const worker = useRef<Worker | null>(null);
@@ -499,8 +573,8 @@ const Scanning = () => {
   const [scanNonce, setScanNonce] = useState(0);
   const [oneDriveKeychainApproved, setOneDriveKeychainApproved] = useState(
     () =>
-      source !== "onedrive" ||
-      sessionStorage.getItem(oneDriveKeychainNoticeKey) === "true"
+      !requiresKeychainApproval ||
+      sessionStorage.getItem(credentialNoticeKey(source)) === "true"
   );
   const [deleteList, setDeleteList] = useState<DiskItem[]>([]);
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
@@ -597,7 +671,7 @@ const Scanning = () => {
     const cloudEventMatches = (event: any) =>
       !isCloud || event.payload?.accountId === accountId;
     const eventName = (name: string) =>
-      isCloud ? `onedrive_${name}` : name;
+      isCloud ? `${cloudEventPrefix}_${name}` : name;
 
     const unlistenStatus = listen(eventName("scan_status"), (event: any) => {
       if (!cloudEventMatches(event)) return;
@@ -629,7 +703,7 @@ const Scanning = () => {
       : Promise.resolve(() => {});
 
     const unlistenCloudFailed = isCloud
-      ? listen("onedrive_scan_failed", (event: any) => {
+      ? listen(`${cloudEventPrefix}_scan_failed`, (event: any) => {
           if (!cloudEventMatches(event)) return;
           setScanError(String(event.payload.message));
           setScanPhase("failed");
@@ -650,7 +724,7 @@ const Scanning = () => {
           setScanIssueReport(emptyScanErrorReport);
         }
         const scanResult = isCloud
-          ? await invoke<string>("read_onedrive_scan_result", {
+          ? await invoke<string>(`read_${cloudCommandPrefix}_scan_result`, {
               path: payload.path,
             })
           : await invoke<string>("read_scan_result", {
@@ -715,20 +789,21 @@ const Scanning = () => {
 
       if (isCloud) {
         if (!accountId) {
-          setScanError("OneDrive account information is missing");
+          setScanError(`${providerName} connection information is missing`);
           setScanPhase("failed");
           return;
         }
-        if (!oneDriveKeychainApproved) {
+        if (requiresKeychainApproval && !oneDriveKeychainApproved) {
           return;
         }
         setLoadedFromCache(false);
         setScanPhase(scanNonce === 0 ? "checkingCache" : "scanning");
         scanningStarted = true;
-        invoke("start_onedrive_scan", {
-          accountId,
-          forceFull: scanNonce > 0,
-        }).catch((error) => {
+        const command = `start_${cloudCommandPrefix}_scan`;
+        const args = isSsh
+          ? { connectionId: accountId }
+          : { accountId, forceFull: scanNonce > 0 };
+        invoke(command, args).catch((error) => {
           setScanError(String(error));
           setScanPhase("failed");
         });
@@ -791,10 +866,15 @@ const Scanning = () => {
     };
   }, [
     accountId,
+    cloudCommandPrefix,
+    cloudEventPrefix,
     disk,
     isCloud,
+    isSsh,
     oneDriveKeychainApproved,
+    providerName,
     ratio,
+    requiresKeychainApproval,
     scanNonce,
   ]);
 
@@ -906,9 +986,44 @@ const Scanning = () => {
     used > 0 ? Math.min(100, (Math.min(scannedTotal, used) / used) * 100) : 0;
   const hasDeterminateProgress =
     !isCloud && scanPhase === "scanning" && status !== null && used > 0;
-  const topBlocks = childRows
-    .filter((node) => !isDeletedPath(node.id, deletedIds))
-    .slice(0, 20);
+  const treemapBlocks = useMemo<TreemapBlock[]>(() => {
+    const candidates = childRows
+      .filter((node) => !isDeletedPath(node.id, deletedIds))
+      .map((node) => ({
+        node,
+        size: statsMap.get(node.id)?.size || 0,
+      }))
+      .filter((item) => item.size > 0)
+      .slice(0, 48);
+
+    if (!candidates.length || currentSize <= 0) {
+      return [];
+    }
+
+    const root = d3
+      .hierarchy<TreemapDatum>({
+        children: candidates.map(({ node, size }) => ({ node, size })),
+      })
+      .sum((item) => item.size || 0)
+      .sort((a, b) => (b.value || 0) - (a.value || 0));
+
+    const layout = d3
+      .treemap<TreemapDatum>()
+      .tile(d3.treemapSquarify.ratio(1.25))
+      .size([1000, 108])
+      .paddingInner(2)
+      .paddingOuter(2)
+      .round(true)(root);
+
+    return layout.leaves().map((leaf, index) => ({
+      node: leaf.data.node!,
+      index,
+      x0: leaf.x0,
+      y0: leaf.y0,
+      x1: leaf.x1,
+      y1: leaf.y1,
+    }));
+  }, [childRows, currentSize, deletedIds, statsMap]);
   const treeColumnCount = isCloud ? 6 : 7;
 
   const handleTreeScroll = () => {
@@ -959,7 +1074,12 @@ const Scanning = () => {
   };
 
   const addDeleteTarget = (node: DiskItem | null) => {
-    if (!node || node.id === "/" || isDeletedPath(node.id, deletedIds)) {
+    if (
+      !canDelete ||
+      !node ||
+      node.id === "/" ||
+      isDeletedPath(node.id, deletedIds)
+    ) {
       return;
     }
 
@@ -992,6 +1112,9 @@ const Scanning = () => {
     setRefreshNotice(null);
     setRefreshingNodeId(node.id);
     try {
+      if (!canRefreshItem) {
+        throw new Error(`Use Rescan to update ${providerName} results`);
+      }
       if (isCloud && !node.cloudId) {
         throw new Error("The selected OneDrive item has no cloud identifier");
       }
@@ -1041,7 +1164,7 @@ const Scanning = () => {
     node: DiskItem,
     deleted: boolean
   ) => {
-    if (event.button !== 0 || node.id === "/" || deleted) {
+    if (!canDelete || event.button !== 0 || node.id === "/" || deleted) {
       return;
     }
 
@@ -1071,7 +1194,7 @@ const Scanning = () => {
     const failedItems: DiskItem[] = [];
     let cloudFailureMessage: string | null = null;
 
-    if (isCloud) {
+    if (isOneDrive) {
       try {
         const result = await invoke<OneDriveDeleteResult>(
           "delete_onedrive_items",
@@ -1151,46 +1274,50 @@ const Scanning = () => {
     });
   };
 
-  if (view === "loading" && isCloud && !oneDriveKeychainApproved) {
+  if (
+    view === "loading" &&
+    requiresKeychainApproval &&
+    !oneDriveKeychainApproved
+  ) {
     return (
-      <div className="flex flex-1 items-center justify-center overflow-auto bg-slate-950 px-6 py-10 text-slate-200">
+      <div className="dialog-stage">
         <div
           role="dialog"
           aria-modal="true"
-          aria-labelledby="onedrive-keychain-title"
-          className="w-full max-w-lg rounded border border-slate-700 bg-slate-900 p-6 shadow-2xl"
+          aria-labelledby="cloud-keychain-title"
+          className="app-dialog w-full max-w-lg p-6"
         >
-          <div className="text-xs font-semibold uppercase text-sky-400">
-            OneDrive security
+          <div className="dialog-eyebrow">
+            {providerName} security
           </div>
           <h1
-            id="onedrive-keychain-title"
-            className="mt-2 text-xl font-semibold text-white"
+            id="cloud-keychain-title"
+            className="dialog-title"
           >
             Allow access to your saved sign-in
           </h1>
-          <p className="mt-3 text-sm leading-6 text-slate-300">
-            DuckDisk stores your Microsoft sign-in token in macOS Keychain. To
-            refresh this OneDrive scan, DuckDisk needs to read that saved token.
+          <p className="dialog-copy">
+            DuckDisk stores your {providerName} sign-in token in macOS Keychain.
+            To refresh this scan, DuckDisk needs to read that saved token.
           </p>
-          <p className="mt-3 text-sm leading-6 text-slate-400">
+          <p className="dialog-copy dialog-copy-muted">
             macOS may ask for your Mac login password. The password is handled
             by macOS and is never received or stored by DuckDisk.
           </p>
           <div className="mt-6 flex justify-end gap-3">
             <button
               onClick={() => navigate("/")}
-              className="rounded border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800"
+              className="button button-secondary"
             >
               Not Now
             </button>
             <button
               autoFocus
               onClick={() => {
-                sessionStorage.setItem(oneDriveKeychainNoticeKey, "true");
+                sessionStorage.setItem(credentialNoticeKey(source), "true");
                 setOneDriveKeychainApproved(true);
               }}
-              className="rounded border border-sky-400 bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-400"
+              className="button button-primary"
             >
               Continue
             </button>
@@ -1202,23 +1329,27 @@ const Scanning = () => {
 
   if (view === "loading") {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center overflow-hidden">
-        <ScanningDuck />
-        <div className="w-2/3 max-w-2xl">
-          <div className="mb-1 mt-5 text-center text-base font-medium text-white">
+      <div className="scan-stage">
+        <div className="scan-visual">
+          <ScanningDuck />
+        </div>
+        <div className="scan-status">
+          <div className="scan-title">
             {phaseLabel(scanPhase, disk)}
           </div>
           {scanError ? (
-            <div className="mb-3 mt-1 text-center text-sm text-red-300">
+            <div className="scan-message scan-message-error">
               {scanError}
             </div>
           ) : (
-            <div className="mb-3 mt-1 text-center text-sm text-slate-400">
+            <div className="scan-message">
               {status
                 ? isCloud
-                  ? `${status.items.toLocaleString()} cloud items received${
-                      status.total ? ` - ${formatBytes(status.total)}` : ""
-                    }`
+                  ? isSsh
+                    ? "Scanning remote path over SSH"
+                    : `${status.items.toLocaleString()} cloud items received${
+                        status.total ? ` - ${formatBytes(status.total)}` : ""
+                      }`
                   : `${status.items.toLocaleString()} ${
                       scanPhase === "incremental" ? "files checked" : "files"
                     } - ${formatBytes(status.total)}${
@@ -1229,9 +1360,9 @@ const Scanning = () => {
                 : "Waiting for scan progress"}
             </div>
           )}
-          <div className="h-3 w-full overflow-hidden rounded-full bg-slate-800">
+          <div className="scan-progress-track">
             <div
-              className={`h-3 rounded-full bg-sky-500 ${
+              className={`scan-progress-fill ${
                 hasDeterminateProgress
                   ? "progress-shimmer"
                   : "progress-indeterminate"
@@ -1247,25 +1378,28 @@ const Scanning = () => {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-slate-950 text-sm text-slate-200">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 border-b border-slate-800 bg-slate-900 px-3 py-2">
+    <div className="results-workspace">
+      <div className="results-summary">
         <div className="min-w-0">
-          <div className="flex items-center gap-2 text-xs text-slate-400">
+          <div className="results-pathbar">
             {parentNode && (
               <button
+                type="button"
+                title="Go to parent folder"
                 onClick={() => {
                   setCurrentNode(parentNode);
                   setExpandedIds(new Set());
                 }}
-                className="rounded border border-slate-700 px-2 py-1 text-slate-200 hover:bg-slate-800"
+                className="button button-secondary h-[26px] min-h-0 px-2"
               >
+                <ArrowUp size={13} />
                 Up
               </button>
             )}
-            <span className="truncate">{currentNode?.id || disk}</span>
+            <span className="truncate text-[#89949e]">{currentNode?.id || disk}</span>
             {refreshingNodeId && (
-              <span className="inline-flex shrink-0 items-center gap-1.5 text-sky-300">
-                <span className="h-2.5 w-2.5 animate-spin rounded-full border border-sky-300 border-t-transparent" />
+              <span className="inline-flex shrink-0 items-center gap-1.5 text-[#62c2e3]">
+                <RefreshCw size={12} className="animate-spin" />
                 Refreshing {getNodeName(findNode(rootNode, refreshingNodeId) || ({ id: refreshingNodeId } as DiskItem))}
               </span>
             )}
@@ -1282,75 +1416,83 @@ const Scanning = () => {
               </span>
             )}
             {loadedFromCache && (
-              <span className="rounded border border-emerald-700/60 px-2 py-0.5 text-emerald-300">
+              <span className="status-chip status-chip-success">
                 {isCloud ? "Delta updated" : "Cached"}
               </span>
             )}
           </div>
-          <div className="mt-2 grid grid-cols-5 gap-3">
-            <div>
-              <div className="text-xs text-slate-500">Selected</div>
-              <div className="truncate text-base font-semibold text-white">
+          <div className="results-metrics">
+            <div className="metric metric-selected">
+              <div className="metric-label">Selected</div>
+              <div className="metric-value truncate">
                 {currentNode ? getNodeName(currentNode) : disk}
               </div>
             </div>
-            <div>
-              <div className="text-xs text-slate-500">Size</div>
-              <div className="tabular-nums text-base font-semibold text-white">
+            <div className="metric">
+              <div className="metric-label">Size</div>
+              <div className="metric-value tabular-nums">
                 {formatBytes(currentSize)}
               </div>
             </div>
-            <div>
-              <div className="text-xs text-slate-500">Items</div>
-              <div className="tabular-nums text-base font-semibold text-white">
+            <div className="metric">
+              <div className="metric-label">Items</div>
+              <div className="metric-value tabular-nums">
                 {currentStats.items.toLocaleString()}
               </div>
             </div>
-            <div>
-              <div className="text-xs text-slate-500">Files</div>
-              <div className="tabular-nums text-base font-semibold text-white">
+            <div className="metric">
+              <div className="metric-label">Files</div>
+              <div className="metric-value tabular-nums">
                 {currentStats.files.toLocaleString()}
               </div>
             </div>
-            <div>
-              <div className="text-xs text-slate-500">Folders</div>
-              <div className="tabular-nums text-base font-semibold text-white">
+            <div className="metric">
+              <div className="metric-label">Folders</div>
+              <div className="metric-value tabular-nums">
                 {currentStats.folders.toLocaleString()}
               </div>
             </div>
           </div>
         </div>
-        <div className="flex items-start gap-2">
+        <div className="results-actions">
           {!isCloud && (
             <button
+              type="button"
               onClick={() => setShowScanIssues(true)}
               disabled={!canOpenScanIssues}
-              className="rounded border border-slate-700 px-3 py-2 text-xs font-medium text-slate-100 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+              className="button button-secondary"
             >
+              <AlertTriangle size={14} />
               Scan Issues
               {issueCount ? ` ${issueCount}` : ""}
             </button>
           )}
           <button
+            type="button"
             onClick={startRescan}
-            className="rounded border border-slate-700 px-3 py-2 text-xs font-medium text-slate-100 hover:bg-slate-800"
+            className="button button-secondary"
           >
-            {isCloud || loadedFromCache ? "Clean Cache & Rescan" : "Rescan"}
+            <RotateCcw size={14} />
+            {(isOneDrive || isGoogleDrive || loadedFromCache) && !isSsh
+              ? "Clean Cache & Rescan"
+              : "Rescan"}
           </button>
           {!isCloud && (
             <button
+              type="button"
               onClick={() => currentNode && reveal(currentNode)}
-              className="rounded border border-slate-700 px-3 py-2 text-xs font-medium text-slate-100 hover:bg-slate-800"
+              className="button button-secondary"
             >
+              <FolderOpen size={14} />
               Reveal
             </button>
           )}
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,2fr)_minmax(300px,0.85fr)] gap-px overflow-hidden bg-slate-800">
-        <section className="flex min-w-0 min-h-0 flex-col overflow-hidden bg-slate-950">
-          <div className="border-b border-slate-800 px-3 py-2 text-xs font-semibold uppercase text-slate-400">
+      <div className="results-split">
+        <section className="data-pane">
+          <div className="pane-title">
             Tree View
           </div>
           <div
@@ -1359,7 +1501,7 @@ const Scanning = () => {
             className="min-h-0 flex-1 overflow-auto"
           >
             <table
-              className="w-full border-collapse text-xs"
+              className="data-table w-full border-collapse text-xs"
               aria-rowcount={rows.length + (parentNode ? 1 : 0) + 1}
             >
               <thead>
@@ -1377,10 +1519,11 @@ const Scanning = () => {
                 {parentNode && (
                   <tr
                     aria-rowindex={2}
-                    className="bg-slate-900/60 hover:bg-slate-800"
+                    className="data-row data-row-parent"
                     style={{ height: TREE_ROW_HEIGHT }}
                   >
                     <td className="border-b border-slate-800 px-2 py-1.5 font-medium text-slate-100">
+                      <FolderUp className="item-type-icon" size={14} />
                       <button
                         onClick={() => {
                           setCurrentNode(parentNode);
@@ -1467,7 +1610,7 @@ const Scanning = () => {
                           y: Math.min(event.clientY, window.innerHeight - 210),
                         });
                       }}
-                      className={`select-none hover:bg-slate-900 ${
+                      className={`data-row select-none ${
                         deleted ? "bg-red-950/20 text-red-300" : ""
                       }`}
                       style={{
@@ -1500,12 +1643,23 @@ const Scanning = () => {
                               event.stopPropagation();
                               toggleExpanded(node);
                             }}
-                            className="mr-2 inline-flex h-4 w-4 items-center justify-center rounded border border-slate-700 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+                            className="tree-toggle"
+                            title={expanded ? "Collapse folder" : "Expand folder"}
+                            aria-label={expanded ? "Collapse folder" : "Expand folder"}
                           >
-                            {expanded ? "-" : "+"}
+                            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                           </button>
                         ) : (
                           <span className="mr-2 inline-block h-4 w-4" />
+                        )}
+                        {directory ? (
+                          <FolderIcon
+                            className="item-type-icon"
+                            size={14}
+                            fill="currentColor"
+                          />
+                        ) : (
+                          <FileIcon className="item-type-icon" size={14} />
                         )}
                         <button
                           disabled={deleted}
@@ -1556,12 +1710,12 @@ const Scanning = () => {
           </div>
         </section>
 
-        <section className="flex min-w-0 min-h-0 flex-col overflow-hidden bg-slate-950">
-          <div className="border-b border-slate-800 px-3 py-2 text-xs font-semibold uppercase text-slate-400">
+        <section className="data-pane">
+          <div className="pane-title">
             File Types
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
-            <table className="w-full border-collapse text-xs">
+            <table className="data-table w-full border-collapse text-xs">
               <thead>
                 <tr>
                   <TableHeader>Ext</TableHeader>
@@ -1576,7 +1730,7 @@ const Scanning = () => {
                   const percent =
                     currentSize > 0 ? (stat.size / currentSize) * 100 : 0;
                   return (
-                    <tr key={stat.extension} className="hover:bg-slate-900">
+                    <tr key={stat.extension} className="data-row">
                       <td className="whitespace-nowrap border-b border-slate-800 px-2 py-1.5 text-slate-100">
                         <span
                           className="mr-2 inline-block h-3 w-3 rounded-sm align-[-1px]"
@@ -1601,55 +1755,86 @@ const Scanning = () => {
         </section>
       </div>
 
-      <div
-        className="grid grid-cols-[minmax(0,1fr)_360px] gap-px border-t border-slate-800 bg-slate-800"
-      >
-        <div className="min-w-0 bg-slate-950 px-2 py-2">
-          <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
-            <span className="truncate">{currentNode?.id || disk}</span>
-            <span>{rootSize > 0 ? `${formatBytes(rootSize)} scanned` : ""}</span>
+      <div className={`results-bottom ${canDelete ? "" : "results-bottom-full"}`}>
+        <div className="treemap-pane">
+          <div className="treemap-toolbar">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="treemap-title">Storage Map</span>
+              <span className="treemap-path">{currentNode?.id || disk}</span>
+            </div>
+            <span className="treemap-total">
+              {rootSize > 0 ? `${formatBytes(rootSize)} scanned` : ""}
+            </span>
           </div>
-          <div className="flex h-16 overflow-hidden rounded-sm border border-slate-800 bg-slate-900">
-            {topBlocks.map((node, index) => {
+          <div className="treemap-stage">
+            {treemapBlocks.map(({ node, index, x0, y0, x1, y1 }) => {
               const blockSize = statsMap.get(node.id)?.size || 0;
-              const width = currentSize > 0 ? (blockSize / currentSize) * 100 : 0;
+              const width = x1 - x0;
+              const height = y1 - y0;
+              const directory = isDirectory(node);
+              const showName = width >= 84 && height >= 25;
+              const showSize = width >= 104 && height >= 48;
               return (
                 <button
                   key={node.id || `${node.name}-${index}`}
-                  onClick={() => isDirectory(node) && setCurrentNode(node)}
-                  className="group relative min-w-[28px] overflow-hidden border-r border-slate-950 text-left"
+                  type="button"
+                  onClick={() => {
+                    if (directory) {
+                      setCurrentNode(node);
+                      setExpandedIds(new Set());
+                    } else if (!isCloud) {
+                      reveal(node);
+                    }
+                  }}
+                  className="treemap-tile group"
                   style={{
-                    width: `${Math.max(1, width)}%`,
-                    backgroundColor: colorForIndex(index),
+                    left: `${x0 / 10}%`,
+                    top: `${(y0 / 108) * 100}%`,
+                    width: `${width / 10}%`,
+                    height: `${(height / 108) * 100}%`,
+                    backgroundColor: treemapColorForIndex(index),
                   }}
                   title={`${getNodeName(node)} - ${formatBytes(blockSize)}`}
                 >
-                  <span className="absolute left-1 top-1 max-w-[10rem] truncate text-[10px] font-semibold text-slate-950 group-hover:underline">
-                    {getNodeName(node)}
-                  </span>
-                  <span className="absolute bottom-1 left-1 text-[10px] text-slate-950">
-                  {formatBytes(blockSize)}
-                </span>
-              </button>
+                  {showName && (
+                    <span className="treemap-tile-name">
+                      {directory ? (
+                        <FolderIcon size={12} fill="currentColor" />
+                      ) : (
+                        <FileIcon size={12} />
+                      )}
+                      <span>{getNodeName(node)}</span>
+                    </span>
+                  )}
+                  {showSize && (
+                    <span className="treemap-tile-size">
+                      {formatBytes(blockSize)}
+                    </span>
+                  )}
+                </button>
               );
             })}
+            {!treemapBlocks.length && (
+              <div className="treemap-empty">No sized items in this folder</div>
+            )}
           </div>
         </div>
+        {canDelete && (
         <div
           ref={dropZoneRef}
-          className={`flex min-w-0 flex-col justify-between bg-slate-950 p-2 transition-colors ${
-            isDeleteTargetActive ? "bg-red-950/40" : ""
+          className={`delete-panel ${
+            isDeleteTargetActive ? "delete-panel-active" : ""
           }`}
         >
           <div
-            className={`min-h-[42px] rounded border border-dashed px-2 py-1.5 text-center text-xs ${
+            className={`delete-dropzone ${
               isDeleteTargetActive
-                ? "border-red-400 text-red-200"
-                : "border-slate-600 text-slate-400"
+                ? "delete-dropzone-active"
+                : ""
             }`}
           >
             {deleteList.length === 0 ? (
-              isCloud
+              isOneDrive
                 ? "Drag files or folders here to move them to the OneDrive Recycle Bin"
                 : "Drag files or folders here to delete"
             ) : (
@@ -1668,16 +1853,16 @@ const Scanning = () => {
                   }
                 >
                   {deleteState.error ||
-                    (isCloud ? "Moving to Recycle Bin" : "Deleting")}
+                    (isOneDrive ? "Moving to Recycle Bin" : "Deleting")}
                 </span>
                 <span>
                   {deleteState.current}/{deleteState.total}
                 </span>
               </div>
-              <div className="h-2 overflow-hidden rounded bg-slate-800">
+              <div className="delete-progress-track">
                 <div
-                  className={`h-2 rounded ${
-                    deleteState.error ? "bg-red-500" : "bg-sky-500"
+                  className={`delete-progress-fill ${
+                    deleteState.error ? "delete-progress-error" : ""
                   }`}
                   style={{
                     width: `${
@@ -1706,25 +1891,27 @@ const Scanning = () => {
                 });
               }}
               disabled={!deleteList.length || deleteState.isDeleting}
-              className="flex-1 rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+              className="button button-secondary flex-1"
             >
               Clear
             </button>
             <button
               onClick={deleteSelected}
               disabled={!deleteList.length || deleteState.isDeleting}
-              className="flex-1 rounded bg-red-700 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="button button-danger flex-1"
             >
+              {!deleteState.isDeleting && <Trash2 size={14} />}
               {deleteState.isDeleting
-                ? `${isCloud ? "Moving" : "Deleting"} ${
+                ? `${isOneDrive ? "Moving" : "Deleting"} ${
                     deleteState.current
                   }/${deleteState.total}`
-                : isCloud
+                : isOneDrive
                 ? "Move to Recycle Bin"
                 : "Delete"}
             </button>
           </div>
         </div>
+        )}
       </div>
       {dragPreview && (
         <div
@@ -1742,13 +1929,13 @@ const Scanning = () => {
           role="menu"
           aria-label={`Actions for ${getNodeName(contextMenu.node)}`}
           onPointerDown={(event) => event.stopPropagation()}
-          className="fixed z-[90] w-52 overflow-hidden rounded border border-slate-600 bg-slate-900 py-1 text-xs text-slate-100 shadow-2xl"
+          className="context-menu fixed z-[90] w-56 overflow-hidden py-1 text-xs"
           style={{
             left: Math.max(8, contextMenu.x),
             top: Math.max(8, contextMenu.y),
           }}
         >
-          <div className="truncate border-b border-slate-700 px-3 py-2 font-semibold text-white">
+          <div className="context-menu-title">
             {getNodeName(contextMenu.node)}
           </div>
           {isDirectory(contextMenu.node) && (
@@ -1759,19 +1946,21 @@ const Scanning = () => {
                 setExpandedIds(new Set());
                 setContextMenu(null);
               }}
-              className="block w-full px-3 py-2 text-left hover:bg-slate-800"
+              className="context-menu-item"
             >
               Open Folder
             </button>
           )}
-          <button
-            role="menuitem"
-            disabled={Boolean(refreshingNodeId)}
-            onClick={() => refreshNode(contextMenu.node)}
-            className="block w-full px-3 py-2 text-left hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Refresh This {isDirectory(contextMenu.node) ? "Folder" : "File"}
-          </button>
+          {canRefreshItem && (
+            <button
+              role="menuitem"
+              disabled={Boolean(refreshingNodeId)}
+              onClick={() => refreshNode(contextMenu.node)}
+              className="context-menu-item disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Refresh This {isDirectory(contextMenu.node) ? "Folder" : "File"}
+            </button>
+          )}
           {!isCloud && (
             <button
               role="menuitem"
@@ -1779,28 +1968,32 @@ const Scanning = () => {
                 reveal(contextMenu.node);
                 setContextMenu(null);
               }}
-              className="block w-full px-3 py-2 text-left hover:bg-slate-800"
+              className="context-menu-item"
             >
               Reveal in Finder
             </button>
           )}
-          <div className="my-1 border-t border-slate-700" />
-          <button
-            role="menuitem"
-            onClick={() => {
-              addDeleteTarget(contextMenu.node);
-              setContextMenu(null);
-            }}
-            className="block w-full px-3 py-2 text-left text-red-300 hover:bg-red-950/40"
-          >
-            {isCloud ? "Add to Recycle Bin List" : "Add to Delete List"}
-          </button>
+          {canDelete && (
+            <>
+              <div className="context-menu-separator" />
+              <button
+                role="menuitem"
+                onClick={() => {
+                  addDeleteTarget(contextMenu.node);
+                  setContextMenu(null);
+                }}
+                className="context-menu-item context-menu-item-danger"
+              >
+                {isOneDrive ? "Add to Recycle Bin List" : "Add to Delete List"}
+              </button>
+            </>
+          )}
         </div>
       )}
       {showScanIssues && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-6">
-          <div className="flex max-h-[82vh] w-full max-w-5xl flex-col overflow-hidden rounded border border-slate-600 bg-[#0b1220] shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-700 bg-[#0f172a] px-4 py-3">
+        <div className="modal-backdrop">
+          <div className="app-dialog flex max-h-[82vh] w-full max-w-5xl flex-col overflow-hidden">
+            <div className="dialog-header">
               <div>
                 <div className="text-sm font-semibold text-white">
                   Scan Issues
@@ -1815,16 +2008,19 @@ const Scanning = () => {
                 {(hasPermissionIssues(scanIssueReport.counts) || loadedFromCache) && (
                   <button
                     onClick={() => invoke("open_full_disk_access_settings")}
-                    className="rounded border border-sky-500/70 px-3 py-1.5 text-xs font-medium text-sky-100 hover:bg-sky-500/15"
+                    className="button button-secondary"
                   >
+                    <ShieldCheck size={14} />
                     Grant Full Disk Access
                   </button>
                 )}
                 <button
                   onClick={() => setShowScanIssues(false)}
-                  className="rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
+                  className="icon-button"
+                  title="Close scan issues"
+                  aria-label="Close scan issues"
                 >
-                  Close
+                  <X size={15} />
                 </button>
               </div>
             </div>

@@ -18,11 +18,23 @@
 pub fn set_window_styles(window: impl raw_window_handle::HasRawWindowHandle) -> Result<(), Error> {
     match window.raw_window_handle() {
         raw_window_handle::RawWindowHandle::AppKit(handle) => {
-            use cocoa::{appkit::NSWindow, base::id};
-            use objc::runtime::YES;
+            use cocoa::{
+                appkit::{NSColor, NSWindow},
+                base::{id, nil},
+            };
+            use objc::{msg_send, sel, sel_impl, runtime::{NO, YES}};
 
             unsafe {
-                (handle.ns_window as id).setHasShadow_(YES);
+                let window = handle.ns_window as id;
+                window.setHasShadow_(YES);
+                window.setOpaque_(NO);
+                window.setBackgroundColor_(NSColor::clearColor(nil));
+
+                let content_view: id = msg_send![window, contentView];
+                let _: () = msg_send![content_view, setWantsLayer: YES];
+                let layer: id = msg_send![content_view, layer];
+                let _: () = msg_send![layer, setCornerRadius: 11.0_f64];
+                let _: () = msg_send![layer, setMasksToBounds: YES];
             }
 
             Ok(())

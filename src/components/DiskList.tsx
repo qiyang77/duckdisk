@@ -7,9 +7,22 @@ import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/api/dialog";
 import { open as openExternal } from "@tauri-apps/api/shell";
 import folderIcon from "../assets/folder.png";
+import oneDriveIcon from "../assets/onedrive.svg";
+import googleDriveIcon from "../assets/google-drive.png";
 import { useNavigate } from "react-router-dom";
 import { formatBytes } from "../formatBytes";
 import { forgetDiskRoute } from "../diskRoute";
+import {
+  ChevronRight,
+  Cloud,
+  ExternalLink,
+  Plus,
+  RefreshCw,
+  Server,
+  ShieldCheck,
+  Unplug,
+  X,
+} from "lucide-react";
 
 type OneDriveAccount = {
   id: string;
@@ -25,25 +38,34 @@ type OneDriveState = {
   accounts: OneDriveAccount[];
 };
 
+type GoogleDriveAccount = {
+  id: string;
+  name: string;
+  email: string;
+  totalSpace: number;
+  usedSpace: number;
+  availableSpace: number;
+};
+
+type GoogleDriveState = {
+  configured: boolean;
+  accounts: GoogleDriveAccount[];
+};
+
+type SshConnection = {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  path: string;
+};
+
 type UpdateCheck = {
   currentVersion: string;
   latestVersion: string;
   updateAvailable: boolean;
   releaseUrl: string;
 };
-
-const CloudIcon = () => (
-  <svg viewBox="0 0 64 64" aria-hidden="true" className="h-14 w-14">
-    <path
-      d="M22 48h28a11 11 0 0 0 1-21.9A17 17 0 0 0 19.3 21 13.5 13.5 0 0 0 22 48Z"
-      fill="#38bdf8"
-    />
-    <path
-      d="M8 48h30a10 10 0 0 0 0-20h-1.2A15 15 0 0 0 8.4 31.6 8.5 8.5 0 0 0 8 48Z"
-      fill="#0284c7"
-    />
-  </svg>
-);
 
 declare global {
   interface Window {
@@ -60,6 +82,18 @@ const DiskList = () => {
   const [oneDrive, setOneDrive] = useState<OneDriveState>({
     configured: false,
     accounts: [],
+  });
+  const [googleDrive, setGoogleDrive] = useState<GoogleDriveState>({
+    configured: false,
+    accounts: [],
+  });
+  const [sshConnections, setSshConnections] = useState<SshConnection[]>([]);
+  const [showSshDialog, setShowSshDialog] = useState(false);
+  const [sshDraft, setSshDraft] = useState({
+    name: "",
+    host: "",
+    port: 22,
+    path: "/",
   });
   const [cloudBusy, setCloudBusy] = useState<string | null>(null);
   const [cloudError, setCloudError] = useState<string | null>(null);
@@ -95,8 +129,19 @@ const DiskList = () => {
     setOneDrive(state);
   };
 
+  const syncGoogleDrive = async () => {
+    const state = await invoke<GoogleDriveState>("get_google_drive_state");
+    setGoogleDrive(state);
+  };
+
+  const syncSshConnections = async () => {
+    setSshConnections(await invoke<SshConnection[]>("get_ssh_connections"));
+  };
+
   useEffect(() => {
-    syncOneDrive().catch((error) => setCloudError(String(error)));
+    Promise.all([syncOneDrive(), syncGoogleDrive(), syncSshConnections()]).catch(
+      (error) => setCloudError(String(error))
+    );
   }, []);
 
   const connectOneDrive = async () => {
@@ -125,6 +170,60 @@ const DiskList = () => {
     }
   };
 
+  const connectGoogleDrive = async () => {
+    setCloudBusy("google-connect");
+    setCloudError(null);
+    try {
+      await invoke("connect_google_drive_account");
+      await syncGoogleDrive();
+    } catch (error) {
+      setCloudError(String(error));
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const disconnectGoogleDrive = async (account: GoogleDriveAccount) => {
+    setCloudBusy(`google-${account.id}`);
+    setCloudError(null);
+    try {
+      await invoke("disconnect_google_drive_account", { accountId: account.id });
+      await syncGoogleDrive();
+    } catch (error) {
+      setCloudError(String(error));
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const saveSshConnection = async () => {
+    setCloudBusy("ssh-save");
+    setCloudError(null);
+    try {
+      await invoke("save_ssh_connection", { connection: sshDraft });
+      await syncSshConnections();
+      setShowSshDialog(false);
+      setSshDraft({ name: "", host: "", port: 22, path: "/" });
+    } catch (error) {
+      setCloudError(String(error));
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
+  const removeSshConnection = async (connection: SshConnection) => {
+    setCloudBusy(`ssh-${connection.id}`);
+    setCloudError(null);
+    try {
+      await invoke("remove_ssh_connection", { connectionId: connection.id });
+      await syncSshConnections();
+    } catch (error) {
+      setCloudError(String(error));
+    } finally {
+      setCloudBusy(null);
+    }
+  };
+
   const checkForUpdates = async () => {
     setCheckingUpdates(true);
     setUpdateCheck(null);
@@ -139,142 +238,361 @@ const DiskList = () => {
   };
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="text-white flex-1 overflow-auto">
-        {disks.map((disk: any) => (
-          <DiskItem key={disk.sMountPoint} disk={disk}></DiskItem>
-        ))}
-        <div
-          className="text-white p-4 flex gap-4 items-center hover:bg-gray-800 cursor-pointer"
-          onClick={() => {
-            open({
-              multiple: false,
-              directory: true,
-            }).then((directory) => {
-              if (directory)
-                navigate("/disk", {
-                  state: {
-                    disk: (directory as string).replace(/\\/g, "/"),
-                    used: 0,
-                    fullscan: true,
-                    isDirectory: true,
-                  },
-                });
-              console.log({ directory });
-            });
-          }}
-        >
-          <div className="w-16 h-16 flex justify-center items-center align-middle">
-            <img src={folderIcon} className="w-12 h-12 opacity-70"></img>
-          </div>
-          <div className="flex-1">
-            <div className="flex justify-between mb-1">
-              <span className="font-medium  text-white text-sm">
-                Select a folder to Scan
-                {/* <span className="opacity-60"></span> */}
-              </span>
-            </div>
-          </div>
-        </div>
-        <section className="border-t border-slate-700/70 bg-slate-950/30">
-          <div className="flex items-center justify-between px-4 py-3">
+    <div className="storage-overview">
+      <div className="storage-scroll">
+        <section className="storage-section" aria-labelledby="local-storage-title">
+          <div className="section-toolbar">
             <div>
-              <div className="text-xs font-semibold uppercase text-slate-400">
-                Cloud Storage
-              </div>
-              <div className="mt-0.5 text-xs text-slate-500">
-                Scan cloud metadata without downloading file contents
-              </div>
+              <h1 id="local-storage-title">Local Storage</h1>
+              <p>{disks.length} {disks.length === 1 ? "volume" : "volumes"} available</p>
             </div>
+          </div>
+          <div className="storage-list">
+            {disks.map((disk: any) => (
+              <DiskItem key={disk.sMountPoint} disk={disk}></DiskItem>
+            ))}
             <button
-              onClick={connectOneDrive}
-              disabled={!oneDrive.configured || cloudBusy !== null}
-              className="rounded border border-sky-500/70 px-3 py-1.5 text-xs font-medium text-sky-100 hover:bg-sky-500/15 disabled:cursor-not-allowed disabled:opacity-40"
+              type="button"
+              className="storage-row group w-full text-left"
+              onClick={() => {
+                open({
+                  multiple: false,
+                  directory: true,
+                }).then((directory) => {
+                  if (directory)
+                    navigate("/disk", {
+                      state: {
+                        disk: (directory as string).replace(/\\/g, "/"),
+                        used: 0,
+                        fullscan: true,
+                        isDirectory: true,
+                      },
+                    });
+                });
+              }}
             >
-              {cloudBusy === "connect" ? "Waiting for Microsoft..." : "Connect OneDrive"}
+              <div className="storage-icon storage-icon-folder">
+                <img src={folderIcon} alt="" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[14px] font-semibold text-[#f4f6f7]">
+                  Scan a Folder
+                </div>
+                <div className="mt-1 text-[12px] text-[#7f8993]">
+                  Choose a specific folder instead of an entire disk
+                </div>
+              </div>
+              <ChevronRight className="storage-chevron" size={17} />
             </button>
           </div>
+        </section>
+
+        <section className="storage-section" aria-labelledby="cloud-storage-title">
+          <div className="section-toolbar">
+            <div>
+              <h2 id="cloud-storage-title">Cloud Storage</h2>
+              <p>OneDrive and Google Drive metadata scanning</p>
+            </div>
+            <div className="section-actions">
+              <button
+                type="button"
+                onClick={connectOneDrive}
+                disabled={!oneDrive.configured || cloudBusy !== null}
+                className="button button-primary"
+              >
+                {cloudBusy === "connect" ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
+                OneDrive
+              </button>
+              <button
+                type="button"
+                onClick={connectGoogleDrive}
+                disabled={!googleDrive.configured || cloudBusy !== null}
+                className="button button-secondary"
+              >
+                {cloudBusy === "google-connect" ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
+                Google Drive
+              </button>
+            </div>
+          </div>
           {!oneDrive.configured && (
-            <div className="border-t border-amber-900/50 bg-amber-950/20 px-4 py-2 text-xs text-amber-200">
+            <div className="inline-alert inline-alert-warning">
               OneDrive sign-in is not configured in this build.
             </div>
           )}
+          {!googleDrive.configured && (
+            <div className="inline-alert inline-alert-warning">
+              Google Drive sign-in is not configured in this build.
+            </div>
+          )}
           {cloudError && (
-            <div className="border-t border-red-900/50 bg-red-950/20 px-4 py-2 text-xs text-red-300">
+            <div className="inline-alert inline-alert-error">
               {cloudError}
             </div>
           )}
-          {oneDrive.accounts.map((account) => {
-            const percent =
-              account.totalSpace > 0
+          <div className="storage-list">
+            {oneDrive.accounts.length === 0 && oneDrive.configured && (
+              <div className="empty-storage-row">
+                <Cloud size={20} />
+                <span>No OneDrive accounts connected</span>
+              </div>
+            )}
+            {oneDrive.accounts.map((account) => {
+              const percent =
+                account.totalSpace > 0
+                  ? Math.min(100, (account.usedSpace / account.totalSpace) * 100)
+                  : 0;
+              return (
+                <div
+                  key={account.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Scan OneDrive - ${account.name}`}
+                  onClick={() =>
+                    navigate("/disk", {
+                      state: {
+                        source: "onedrive",
+                        accountId: account.id,
+                        disk: `OneDrive - ${account.name}`,
+                        used: account.usedSpace,
+                      },
+                    })
+                  }
+                  onKeyDown={(event) => {
+                    if (
+                      event.target === event.currentTarget &&
+                      (event.key === "Enter" || event.key === " ")
+                    ) {
+                      event.preventDefault();
+                      navigate("/disk", {
+                        state: {
+                          source: "onedrive",
+                          accountId: account.id,
+                          disk: `OneDrive - ${account.name}`,
+                          used: account.usedSpace,
+                        },
+                      });
+                    }
+                  }}
+                  className="storage-row group"
+                >
+                  <div className="storage-icon storage-icon-onedrive">
+                    <img src={oneDriveIcon} alt="" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-6">
+                      <div className="min-w-0">
+                        <div className="truncate text-[14px] font-semibold text-[#f4f6f7]">
+                          OneDrive - {account.name}
+                        </div>
+                        <div className="mt-1 text-[12px] tabular-nums text-[#a6afb8]">
+                          {formatBytes(account.usedSpace)} of{" "}
+                          {formatBytes(account.totalSpace)} used
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-3">
+                        <div className="text-right tabular-nums">
+                          <div className="text-[13px] font-semibold text-[#eef1f3]">
+                            {percent.toFixed(0)}%
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-[#7f8993]">
+                            {formatBytes(account.availableSpace)} free
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          title={`Disconnect OneDrive - ${account.name}`}
+                          aria-label={`Disconnect OneDrive - ${account.name}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            disconnectOneDrive(account);
+                          }}
+                          disabled={cloudBusy !== null}
+                          className="icon-button icon-button-danger"
+                        >
+                          {cloudBusy === account.id ? (
+                            <RefreshCw size={14} className="animate-spin" />
+                          ) : (
+                            <Unplug size={14} />
+                          )}
+                        </button>
+                        <ChevronRight className="storage-chevron" size={17} />
+                      </div>
+                    </div>
+                    <div className="storage-meter" data-tone="cloud">
+                      <div style={{ width: `${percent}%` }} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {googleDrive.accounts.map((account) => {
+              const percent = account.totalSpace > 0
                 ? Math.min(100, (account.usedSpace / account.totalSpace) * 100)
                 : 0;
-            return (
-              <div
-                key={account.id}
-                onClick={() =>
-                  navigate("/disk", {
-                    state: {
-                      source: "onedrive",
-                      accountId: account.id,
-                      disk: `OneDrive - ${account.name}`,
-                      used: account.usedSpace,
-                    },
-                  })
-                }
-                className="flex cursor-pointer items-center gap-4 border-t border-slate-800 px-4 py-3 hover:bg-slate-800"
-              >
-                <div className="flex h-16 w-16 shrink-0 items-center justify-center">
-                  <CloudIcon />
+              return (
+                <div
+                  key={`google-${account.id}`}
+                  role="button"
+                  tabIndex={0}
+                  className="storage-row group"
+                  onClick={() => navigate("/disk", { state: {
+                    source: "googledrive",
+                    accountId: account.id,
+                    disk: `Google Drive - ${account.name}`,
+                    used: account.usedSpace,
+                  }})}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      navigate("/disk", { state: {
+                        source: "googledrive",
+                        accountId: account.id,
+                        disk: `Google Drive - ${account.name}`,
+                        used: account.usedSpace,
+                      }});
+                    }
+                  }}
+                >
+                  <div className="storage-icon storage-icon-google-drive">
+                    <img src={googleDriveIcon} alt="" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-6">
+                      <div className="min-w-0">
+                        <div className="truncate text-[14px] font-semibold text-[#f4f6f7]">
+                          Google Drive - {account.name}
+                        </div>
+                        <div className="mt-1 truncate text-[12px] tabular-nums text-[#a6afb8]">
+                          {formatBytes(account.usedSpace)} of {formatBytes(account.totalSpace)} used · {account.email}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-3">
+                        <div className="text-right tabular-nums">
+                          <div className="text-[13px] font-semibold text-[#eef1f3]">{percent.toFixed(0)}%</div>
+                          <div className="mt-0.5 text-[11px] text-[#7f8993]">{formatBytes(account.availableSpace)} free</div>
+                        </div>
+                        <button
+                          type="button"
+                          className="icon-button icon-button-danger"
+                          title={`Disconnect Google Drive - ${account.name}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            disconnectGoogleDrive(account);
+                          }}
+                          disabled={cloudBusy !== null}
+                        >
+                          {cloudBusy === `google-${account.id}` ? <RefreshCw size={14} className="animate-spin" /> : <Unplug size={14} />}
+                        </button>
+                        <ChevronRight className="storage-chevron" size={17} />
+                      </div>
+                    </div>
+                    <div className="storage-meter" data-tone="google"><div style={{ width: `${percent}%` }} /></div>
+                  </div>
                 </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="storage-section" aria-labelledby="remote-storage-title">
+          <div className="section-toolbar">
+            <div>
+              <h2 id="remote-storage-title">Remote Servers</h2>
+              <p>Scan a remote path through your existing SSH keys and config</p>
+            </div>
+            <button type="button" className="button button-secondary" onClick={() => setShowSshDialog(true)}>
+              <Plus size={14} />
+              Add SSH Connection
+            </button>
+          </div>
+          <div className="storage-list">
+            {sshConnections.length === 0 && (
+              <div className="empty-storage-row"><Server size={20} /><span>No SSH connections saved</span></div>
+            )}
+            {sshConnections.map((connection) => (
+              <div
+                key={connection.id}
+                role="button"
+                tabIndex={0}
+                className="storage-row group"
+                onClick={() => navigate("/disk", { state: {
+                  source: "ssh",
+                  accountId: connection.id,
+                  disk: connection.name,
+                  used: 0,
+                }})}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    navigate("/disk", { state: {
+                      source: "ssh",
+                      accountId: connection.id,
+                      disk: connection.name,
+                      used: 0,
+                    }});
+                  }
+                }}
+              >
+                <div className="storage-icon storage-icon-ssh"><Server size={30} /></div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-white">
-                        OneDrive - {account.name}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-400">
-                        {formatBytes(account.usedSpace)} of{" "}
-                        {formatBytes(account.totalSpace)} used
-                      </div>
-                    </div>
-                    <div className="shrink-0 text-right text-xs text-slate-300">
-                      {percent.toFixed(0)}%
-                      <div className="mt-0.5 text-slate-500">
-                        {formatBytes(account.availableSpace)} free
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-700">
-                    <div
-                      className="h-full rounded-full bg-sky-500"
-                      style={{ width: `${percent}%` }}
-                    />
-                  </div>
+                  <div className="truncate text-[14px] font-semibold text-[#f4f6f7]">{connection.name}</div>
+                  <div className="mt-1 truncate text-[12px] text-[#a6afb8]">{connection.host}:{connection.port} · {connection.path}</div>
                 </div>
                 <button
+                  type="button"
+                  className="icon-button icon-button-danger"
+                  title={`Remove ${connection.name}`}
                   onClick={(event) => {
                     event.stopPropagation();
-                    disconnectOneDrive(account);
+                    removeSshConnection(connection);
                   }}
                   disabled={cloudBusy !== null}
-                  className="shrink-0 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-red-500/70 hover:text-red-300 disabled:opacity-40"
                 >
-                  {cloudBusy === account.id ? "Disconnecting..." : "Disconnect"}
+                  {cloudBusy === `ssh-${connection.id}` ? <RefreshCw size={14} className="animate-spin" /> : <Unplug size={14} />}
                 </button>
+                <ChevronRight className="storage-chevron" size={17} />
               </div>
-            );
-          })}
+            ))}
+          </div>
         </section>
       </div>
-      <div className="border-t border-slate-700/60 bg-slate-950/60 p-3 text-white w-full flex items-center justify-end gap-4">
-        <div className="flex shrink-0 items-center gap-3">
+      {showSshDialog && (
+        <div className="modal-backdrop">
+          <div className="app-dialog ssh-dialog">
+            <div className="dialog-header">
+              <div>
+                <div className="text-sm font-semibold text-white">Add SSH Connection</div>
+                <div className="mt-1 text-xs text-slate-400">Uses macOS ssh, ~/.ssh/config, and your existing keys</div>
+              </div>
+              <button className="icon-button" title="Close" onClick={() => setShowSshDialog(false)}><X size={15} /></button>
+            </div>
+            <div className="ssh-form">
+              <label><span>Name</span><input value={sshDraft.name} placeholder="Production server" onChange={(event) => setSshDraft({ ...sshDraft, name: event.target.value })} /></label>
+              <label><span>Host or SSH alias</span><input value={sshDraft.host} placeholder="user@example.com or my-server" onChange={(event) => setSshDraft({ ...sshDraft, host: event.target.value })} /></label>
+              <div className="ssh-form-grid">
+                <label><span>Port</span><input type="number" min="1" max="65535" value={sshDraft.port} onChange={(event) => setSshDraft({ ...sshDraft, port: Number(event.target.value) })} /></label>
+                <label><span>Remote path</span><input value={sshDraft.path} placeholder="/" onChange={(event) => setSshDraft({ ...sshDraft, path: event.target.value })} /></label>
+              </div>
+              <div className="ssh-form-note">Password prompts are not stored or shown. Configure key-based login in Terminal before scanning.</div>
+              <div className="ssh-form-actions">
+                <button className="button button-secondary" onClick={() => setShowSshDialog(false)}>Cancel</button>
+                <button className="button button-primary" disabled={!sshDraft.host.trim() || cloudBusy !== null} onClick={saveSshConnection}>
+                  {cloudBusy === "ssh-save" && <RefreshCw size={14} className="animate-spin" />}
+                  Save Connection
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      <footer className="app-footer">
+        <div className="flex min-w-0 items-center gap-3">
           {updateCheck && (
             <span
-              className={`text-xs ${
+              className={`status-text ${
                 updateCheck.updateAvailable
-                  ? "text-amber-300"
-                  : "text-emerald-300"
+                  ? "status-text-warning"
+                  : "status-text-success"
               }`}
             >
               {updateCheck.updateAvailable
@@ -283,34 +601,42 @@ const DiskList = () => {
             </span>
           )}
           {updateError && (
-            <span className="max-w-[260px] truncate text-xs text-red-300">
+            <span className="status-text status-text-error max-w-[260px] truncate">
               {updateError}
             </span>
           )}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
           {updateCheck?.updateAvailable && (
             <button
+              type="button"
               onClick={() => openExternal(updateCheck.releaseUrl)}
-              className="rounded border border-amber-500/70 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-500/15"
+              className="button button-warning"
             >
+              <ExternalLink size={14} />
               View Release
             </button>
           )}
           <button
+            type="button"
             onClick={checkForUpdates}
             disabled={isCheckingUpdates}
-            className="rounded border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-100 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+            className="button button-secondary"
           >
+            <RefreshCw size={14} className={isCheckingUpdates ? "animate-spin" : ""} />
             {isCheckingUpdates ? "Checking..." : "Check for Updates"}
           </button>
           <button
+            type="button"
             onClick={() => invoke("open_full_disk_access_settings")}
-            className="rounded border border-sky-500/70 px-3 py-1.5 text-xs font-medium text-sky-100 hover:bg-sky-500/15"
+            className="button button-secondary"
           >
+            <ShieldCheck size={14} />
             Grant Full Disk Access
           </button>
-          <div className="text-xs text-slate-400">v {appVersion}</div>
+          <div className="version-label">v {appVersion}</div>
         </div>
-      </div>
+      </footer>
     </div>
   );
 };

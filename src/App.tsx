@@ -13,7 +13,7 @@ function App() {
 
   return (
     <Router initialEntries={initialEntries}>
-      <div className="flex h-full flex-col items-stretch justify-items-stretch overflow-hidden">
+      <div className="app-shell">
         <TitleBar></TitleBar>
         <Routes>
           <Route path="/" element={<DiskList />} />

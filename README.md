@@ -7,7 +7,7 @@
 ![arch](https://img.shields.io/badge/arch-arm64-lightgrey)
 ![stack](https://img.shields.io/badge/stack-Tauri%20%7C%20Rust%20%7C%20React-orange)
 
-**DuckDisk** is a macOS disk and cloud storage analyzer inspired by **WizTree-style** workflows. It scans disks, folders, and OneDrive metadata, shows where space is going in dense tables, and lets you quickly reveal or remove large items from one place.
+**DuckDisk** is a macOS disk, cloud storage, and remote server analyzer inspired by **WizTree-style** workflows. It scans disks, folders, OneDrive, Google Drive, and SSH paths, then shows where space is going in dense tables.
 
 The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
@@ -32,10 +32,12 @@ Website: https://duckdisk.com/
 ## Features
 
 - **OneDrive cloud analysis** using file metadata only, without downloading file contents.
+- **Google Drive analysis** with OAuth, metadata-only scanning, and incremental change tracking.
+- **SSH remote path analysis** through macOS `ssh`, existing keys, and `~/.ssh/config`.
 - **Fast incremental cloud refreshes** using Microsoft Graph delta updates and a local metadata cache.
 - **OneDrive cleanup** that moves selected files and folders to the Recycle Bin.
 - **Dense tree view** with folder/file counts, sizes, allocated size, and parent percentage.
-- **Virtualized large directories** that keep local and OneDrive result tables responsive.
+- **Virtualized large directories** that keep local and remote result tables responsive.
 - **Drag-to-delete** cleanup for local and OneDrive scan results.
 - File type summary with extension totals and percentages.
 - Finder integration for revealing files and folders.
@@ -52,6 +54,8 @@ For accurate full-disk scans, grant DuckDisk Full Disk Access:
 If macOS prompts for permissions during a scan, denied or previously blocked reads may count as scan errors. After granting permissions, run `Rescan` for cleaner results.
 
 OneDrive scans use Microsoft account authorization and request `Files.ReadWrite` so selected files and folders can be moved to the OneDrive Recycle Bin. DuckDisk does not permanently delete cloud items. Refresh tokens are stored in macOS Keychain; cached scan metadata is stored in DuckDisk's application cache.
+
+Google Drive scans request read-only metadata access and do not download file contents. SSH scans are read-only and use the system `ssh` command; configure key-based login before adding a connection in DuckDisk.
 
 ## Installation
 
@@ -87,6 +91,17 @@ DUCKDISK_ONEDRIVE_CLIENT_ID=your-client-id npm run tauri build
 ```
 
 For GitHub releases, set the repository Actions variable `ONEDRIVE_CLIENT_ID`.
+
+### Google Drive development setup
+
+Create a Google OAuth client with application type **Desktop app**, enable the Google Drive API, and add your Google account as a test user while the consent screen remains in testing. No client secret is embedded.
+
+```bash
+DUCKDISK_GOOGLE_CLIENT_ID=your-client-id npm run tauri dev
+DUCKDISK_GOOGLE_CLIENT_ID=your-client-id npm run tauri build
+```
+
+For GitHub releases, set the repository Actions variable `GOOGLE_DRIVE_CLIENT_ID`.
 
 The macOS installer is generated under:
 

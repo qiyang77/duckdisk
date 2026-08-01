@@ -1,5 +1,7 @@
+mod google_drive;
 mod onedrive;
 mod scan;
+mod ssh;
 mod updates;
 mod window_style;
 
@@ -55,6 +57,16 @@ fn main() {
             read_onedrive_scan_result,
             refresh_onedrive_item,
             delete_onedrive_items,
+            get_google_drive_state,
+            connect_google_drive_account,
+            disconnect_google_drive_account,
+            start_google_drive_scan,
+            read_google_drive_scan_result,
+            get_ssh_connections,
+            save_ssh_connection,
+            remove_ssh_connection,
+            start_ssh_scan,
+            read_ssh_scan_result,
             check_for_updates,
             open_full_disk_access_settings,
             show_in_folder
@@ -222,6 +234,76 @@ async fn delete_onedrive_items(
     item_ids: Vec<String>,
 ) -> Result<onedrive::OneDriveDeleteResult, String> {
     onedrive::delete_items(&app_handle, &account_id, item_ids).await
+}
+
+#[tauri::command]
+fn get_google_drive_state(
+    app_handle: tauri::AppHandle,
+) -> Result<google_drive::GoogleDriveState, String> {
+    google_drive::get_state(&app_handle)
+}
+
+#[tauri::command]
+async fn connect_google_drive_account(
+    app_handle: tauri::AppHandle,
+) -> Result<google_drive::GoogleDriveAccount, String> {
+    google_drive::connect_account(&app_handle).await
+}
+
+#[tauri::command]
+fn disconnect_google_drive_account(
+    app_handle: tauri::AppHandle,
+    account_id: String,
+) -> Result<(), String> {
+    google_drive::disconnect_account(&app_handle, &account_id)
+}
+
+#[tauri::command]
+fn start_google_drive_scan(
+    app_handle: tauri::AppHandle,
+    account_id: String,
+    force_full: bool,
+) -> Result<(), String> {
+    google_drive::start_scan(app_handle, account_id, force_full)
+}
+
+#[tauri::command]
+fn read_google_drive_scan_result(path: String) -> Result<String, String> {
+    google_drive::read_scan_result(&path)
+}
+
+#[tauri::command]
+fn get_ssh_connections(app_handle: tauri::AppHandle) -> Result<Vec<ssh::SshConnection>, String> {
+    ssh::get_connections(&app_handle)
+}
+
+#[tauri::command]
+fn save_ssh_connection(
+    app_handle: tauri::AppHandle,
+    connection: ssh::SshConnectionInput,
+) -> Result<ssh::SshConnection, String> {
+    ssh::save_connection(&app_handle, connection)
+}
+
+#[tauri::command]
+fn remove_ssh_connection(
+    app_handle: tauri::AppHandle,
+    connection_id: String,
+) -> Result<(), String> {
+    ssh::remove_connection(&app_handle, &connection_id)
+}
+
+#[tauri::command]
+fn start_ssh_scan(
+    app_handle: tauri::AppHandle,
+    connection_id: String,
+) -> Result<(), String> {
+    ssh::start_scan(app_handle, connection_id)
+}
+
+#[tauri::command]
+fn read_ssh_scan_result(path: String) -> Result<String, String> {
+    ssh::read_scan_result(&path)
 }
 
 #[tauri::command]

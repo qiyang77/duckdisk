@@ -1,103 +1,92 @@
 import Logo from "../assets/duck.png";
 import { Link, useLocation } from "react-router-dom";
 import { appWindow } from "@tauri-apps/api/window";
-const CloseButton = () => {
+import { ChevronRight, Maximize2, Minus, X } from "lucide-react";
+
+const WindowControls = () => {
   return (
-    <button
-      onClick={() => {
-        appWindow.close();
-      }}
-    >
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        className="h-6 w-6"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
+    <div className="window-controls" aria-label="Window controls">
+      <button
+        type="button"
+        className="window-control window-control-close"
+        title="Close"
+        aria-label="Close DuckDisk"
+        onClick={() => appWindow.close()}
       >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M6 18L18 6M6 6l12 12"
-        />
-      </svg>
-    </button>
+        <X size={8} strokeWidth={2.4} />
+      </button>
+      <button
+        type="button"
+        className="window-control window-control-minimize"
+        title="Minimize"
+        aria-label="Minimize DuckDisk"
+        onClick={() => appWindow.minimize()}
+      >
+        <Minus size={8} strokeWidth={2.4} />
+      </button>
+      <button
+        type="button"
+        className="window-control window-control-zoom"
+        title="Zoom"
+        aria-label="Zoom DuckDisk"
+        onClick={() => appWindow.toggleMaximize()}
+      >
+        <Maximize2 size={7} strokeWidth={2.4} />
+      </button>
+    </div>
   );
 };
+
 const TitleBar = () => {
   let { state, pathname } = useLocation() as any;
   return (
     <div
       data-tauri-drag-region
-      className="flex bg-darkBlue h-70 justify-between w-full items-center pl-3 pr-3 titlebar bg-cyan-800 p-2 text-white"
-      style={{ background: "#0F1831" }}
+      className="titlebar app-titlebar"
+      onDoubleClick={(event) => {
+        if (!(event.target as HTMLElement).closest("button, a")) {
+          appWindow.toggleMaximize();
+        }
+      }}
     >
-      <CloseButton></CloseButton>
-      <div className="font-bold">
-        <nav className="flex navi" aria-label="Breadcrumb">
-          <ol className="inline-flex items-center space-x-1 md:space-x-3">
-            <li className="inline-flex items-center">
+      <WindowControls />
+      <nav className="navi titlebar-breadcrumbs" aria-label="Breadcrumb">
+        <ol className="flex min-w-0 items-center">
+          <li className="inline-flex min-w-0 items-center">
+            {pathname === "/" ? (
+              <span className="titlebar-product">DuckDisk</span>
+            ) : (
               <Link
                 to="/"
-                className="inline-flex items-center text-sm  cursor-pointer text-gray-400 hover:text-white"
+                className="titlebar-link titlebar-product"
               >
                 DuckDisk
               </Link>
-            </li>
+            )}
+          </li>
 
-            {pathname == "/disk" && (
-              <li>
-                <div className="flex items-center">
-                  <svg
-                    className="w-6 h-6 text-gray-400"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  <Link
-                    to="/"
-                    className="ml-1 text-sm font-medium cursor-pointer md:ml-2 text-gray-400 hover:text-white"
-                  >
-                    All Disks
-                  </Link>
-                </div>
-              </li>
-            )}
-            {state && state.disk && (
-              <li aria-current="page">
-                <div className="flex items-center">
-                  <svg
-                    className="w-6 h-6 text-gray-400"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  <span className="ml-1 text-sm font-medium md:ml-2 text-gray-500">
-                    {state.source === "onedrive"
-                      ? state.disk
-                      : `${state.isDirectory ? "Folder" : "Disk"} (${state.disk})`}
-                  </span>
-                </div>
-              </li>
-            )}
-          </ol>
-        </nav>
-      </div>
-      <div className="flex">
-        <img src={Logo} className="h-6 w-6"></img>
+          {pathname === "/disk" && (
+            <li className="titlebar-crumb">
+              <ChevronRight size={15} strokeWidth={2.2} />
+              <Link to="/" className="titlebar-link">
+                All Disks
+              </Link>
+            </li>
+          )}
+          {state && state.disk && (
+            <li className="titlebar-crumb min-w-0" aria-current="page">
+              <ChevronRight size={15} strokeWidth={2.2} />
+              <span className="truncate text-[12px] font-medium text-[#7f8993]">
+                {state.source && state.source !== "local"
+                  ? state.disk
+                  : `${state.isDirectory ? "Folder" : "Disk"} (${state.disk})`}
+              </span>
+            </li>
+          )}
+        </ol>
+      </nav>
+      <div className="titlebar-brand" aria-hidden="true">
+        <img src={Logo} alt="" />
       </div>
     </div>
   );

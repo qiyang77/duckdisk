@@ -3,7 +3,7 @@ export type DiskRouteState = {
   used?: number;
   fullscan?: boolean;
   isDirectory?: boolean;
-  source?: "local" | "onedrive";
+  source?: "local" | "onedrive" | "googledrive" | "ssh";
   accountId?: string;
 };
 

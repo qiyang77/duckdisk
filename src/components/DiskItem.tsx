@@ -3,68 +3,75 @@ import removableDriver from "../assets/removable-drive.png";
 
 import { useNavigate } from "react-router-dom";
 import { formatBytes } from "../formatBytes";
+import { ChevronRight } from "lucide-react";
 
 const DiskItem = ({ disk }: any) => {
   const navigate = useNavigate();
-  const x = [
-    { tc: "text-green-700", bg: "bg-green-600", from: 0, to: 0.6 },
-    { tc: "text-yellow-700", bg: "bg-yellow-600", from: 0.6, to: 0.7 },
-    { tc: "text-red-700", bg: "bg-red-600", from: 0.7, to: 1 },
-  ];
-
   const usedSpace = Math.max(0, disk.totalSpace - disk.availableSpace);
   const perc = disk.totalSpace > 0 ? usedSpace / disk.totalSpace : 0;
-  const xy: any = x.find((e) => perc > e.from && perc <= e.to);
+  const usageTone = perc >= 0.85 ? "critical" : perc >= 0.7 ? "warning" : "healthy";
 
   const icona = disk.isRemovable ? removableDriver : diskIcon;
+  const scanDisk = () => {
+    navigate("/disk", {
+      state: {
+        disk: disk.sMountPoint,
+        used: usedSpace,
+        fullscan: true,
+      },
+    });
+  };
+
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Scan ${disk.name || "Local Disk"}`}
       onContextMenu={(e) => {
         e.preventDefault();
-        navigate("/disk", {
-          state: {
-            disk: disk.sMountPoint,
-            used: usedSpace,
-            fullscan: true,
-          },
-        });
+        scanDisk();
       }}
-      onClick={() => {
-        navigate("/disk", {
-          state: {
-            disk: disk.sMountPoint,
-            used: usedSpace,
-            fullscan: true,
-          },
-        });
+      onClick={scanDisk}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          scanDisk();
+        }
       }}
-      className="text-white p-4 flex gap-4 items-center hover:bg-gray-800 cursor-pointer"
+      className="storage-row group"
     >
-      <img src={icona} className="w-16 h-16"></img>
-      <div className="flex-1">
-        <div className="flex justify-between mb-1">
-          <span className="font-medium  text-white">
-            {disk.name ? disk.name : "Local Disk"}{" "}
-            <span className="text-xs">({disk.sMountPoint})</span>
-            <br />
-            <span className="text-sm font-medium text-slate-400">
+      <div className="storage-icon storage-icon-local">
+        <img src={icona} alt="" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start justify-between gap-6">
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-baseline gap-2">
+              <span className="truncate text-[14px] font-semibold text-[#f4f6f7]">
+                {disk.name ? disk.name : "Local Disk"}
+              </span>
+              <span className="truncate text-[11px] text-[#7f8993]">
+                {disk.sMountPoint}
+              </span>
+            </div>
+            <div className="mt-1 text-[12px] tabular-nums text-[#a6afb8]">
               {formatBytes(usedSpace)} of {formatBytes(disk.totalSpace)} used
-            </span>
-          </span>
-          <span className="text-sm font-medium text-right text-white">
-            {(perc * 100).toFixed(0)}%<br />
-            <span className="opacity-60">
-              {formatBytes(disk.availableSpace)} Free
-            </span>
-          </span>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-4">
+            <div className="text-right tabular-nums">
+              <div className="text-[13px] font-semibold text-[#eef1f3]">
+                {(perc * 100).toFixed(0)}%
+              </div>
+              <div className="mt-0.5 text-[11px] text-[#7f8993]">
+                {formatBytes(disk.availableSpace)} free
+              </div>
+            </div>
+            <ChevronRight className="storage-chevron" size={17} />
+          </div>
         </div>
-        <div className="w-full mt-2 bg-gray-700 rounded-full h-2.5">
-          {xy && (
-            <div
-              className={"h-2.5 rounded-full " + xy.bg}
-              style={{ width: perc * 100 + "%" }}
-            ></div>
-          )}
+        <div className="storage-meter" data-tone={usageTone}>
+          <div style={{ width: `${Math.min(100, perc * 100)}%` }} />
         </div>
       </div>
     </div>
