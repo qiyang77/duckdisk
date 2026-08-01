@@ -760,6 +760,17 @@ const Scanning = () => {
       }
     );
 
+    const listenersReady = Promise.all([
+      unlistenStatus,
+      unlistenFinalizing,
+      unlistenIncremental,
+      unlistenFull,
+      unlistenFailed,
+      unlistenCloudFailed,
+      unlistenCompleted,
+      unlistenDeleteStatus,
+    ]);
+
     worker.current = new Worker(
       new URL("../scanResult.worker.ts", import.meta.url),
       { type: "module" }
@@ -795,6 +806,13 @@ const Scanning = () => {
       setDeleteList([]);
       setDeletedIds(new Set());
       setScanPhase(scanNonce === 0 ? "checkingCache" : "scanning");
+
+      // Cached cloud and SSH scans can emit their completion events before
+      // invoke() resolves, so every listener must be active before starting.
+      await listenersReady;
+      if (disposed) {
+        return;
+      }
 
       if (isCloud) {
         if (!accountId) {
