@@ -398,6 +398,7 @@ h3 {
 }
 
 .product-shot img {
+  border-radius: 10px 10px 0 0;
   display: block;
   height: auto;
   width: 100%;
@@ -1042,6 +1043,7 @@ code {
   }
 
   .product-shot img {
+    border-radius: 0;
     min-height: 250px;
     object-fit: cover;
     object-position: left center;
