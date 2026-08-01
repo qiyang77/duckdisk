@@ -542,11 +542,10 @@ h3 {
   background: var(--ink-soft);
 }
 
-.workflow-layout {
-  align-items: center;
+.demo-grid {
   display: grid;
-  gap: 64px;
-  grid-template-columns: minmax(280px, 0.65fr) minmax(0, 1.35fr);
+  gap: 28px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .compact-heading {
@@ -931,7 +930,7 @@ code {
   }
 
   .cloud-layout,
-  .workflow-layout,
+  .demo-grid,
   .privacy-layout,
   .faq-layout {
     gap: 52px;

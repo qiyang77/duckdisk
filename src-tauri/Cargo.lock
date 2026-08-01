@@ -630,7 +630,7 @@ dependencies = [
 
 [[package]]
 name = "duckdisk-tauri"
-version = "0.5.6"
+version = "0.5.7"
 dependencies = [
  "cocoa",
  "keyring",

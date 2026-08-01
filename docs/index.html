@@ -22,8 +22,8 @@
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://duckdisk.com/">
     <meta property="og:image" content="https://duckdisk.com/screenshots/scan-results.png">
-    <meta property="og:image:width" content="1521">
-    <meta property="og:image:height" content="733">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="760">
     <meta property="og:site_name" content="DuckDisk">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="DuckDisk - Disk and cloud storage analyzer for macOS">
@@ -40,12 +40,12 @@
         "name": "DuckDisk",
         "applicationCategory": "UtilitiesApplication",
         "operatingSystem": "macOS",
-        "softwareVersion": "0.5.6",
+        "softwareVersion": "0.5.7",
         "description": "Open-source disk and cloud storage analyzer for macOS.",
         "url": "https://duckdisk.com/",
         "image": "https://duckdisk.com/assets/duckdisk-icon.png",
-        "downloadUrl": "https://github.com/qiyang77/duckdisk/releases/download/v0.5.6/DuckDisk_0.5.6_arm64.dmg",
-        "installUrl": "https://github.com/qiyang77/duckdisk/releases/tag/v0.5.6",
+        "downloadUrl": "https://github.com/qiyang77/duckdisk/releases/download/v0.5.7/DuckDisk_0.5.7_arm64.dmg",
+        "installUrl": "https://github.com/qiyang77/duckdisk/releases/tag/v0.5.7",
         "codeRepository": "https://github.com/qiyang77/duckdisk",
         "license": "https://github.com/qiyang77/duckdisk/blob/main/LICENSE",
         "author": {
@@ -61,7 +61,7 @@
     </script>
 
     <link rel="stylesheet" href="styles.css">
-    <script src="site.js" defer></script>
+    <script src="site.js?v=0.5.7" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -80,7 +80,7 @@
         </div>
         <a
           class="button button-small button-primary"
-          href="https://github.com/qiyang77/duckdisk/releases/download/v0.5.6/DuckDisk_0.5.6_arm64.dmg"
+          href="https://github.com/qiyang77/duckdisk/releases/download/v0.5.7/DuckDisk_0.5.7_arm64.dmg"
           data-download
         >
           Download
@@ -101,7 +101,7 @@
           <div class="hero-actions">
             <a
               class="button button-primary"
-              href="https://github.com/qiyang77/duckdisk/releases/download/v0.5.6/DuckDisk_0.5.6_arm64.dmg"
+              href="https://github.com/qiyang77/duckdisk/releases/download/v0.5.7/DuckDisk_0.5.7_arm64.dmg"
               data-download
             >
               Download for macOS
@@ -114,7 +114,7 @@
             </a>
           </div>
           <p class="download-meta">
-            v0.5.6 · Apple Silicon arm64 · 11.3 MB · Free and open source
+            v0.5.7 · Apple Silicon arm64 · Free and open source
           </p>
         </div>
         <a class="hero-scroll" href="#overview">Explore the product</a>
@@ -156,8 +156,8 @@
           <figure class="product-shot product-shot-wide">
             <img
               src="screenshots/scan-results.png"
-              width="1521"
-              height="733"
+              width="1200"
+              height="760"
               alt="DuckDisk scan results showing a directory tree, size percentages, item counts, file types, and cleanup targets"
               loading="eager"
             >
@@ -230,8 +230,8 @@
           <figure class="product-shot cloud-shot">
             <img
               src="screenshots/disk-list.png"
-              width="1100"
-              height="600"
+              width="1200"
+              height="760"
               alt="DuckDisk start screen showing local disks and connected cloud storage accounts"
               loading="lazy"
             >
@@ -243,25 +243,44 @@
         </div>
       </section>
 
-      <section class="section workflow-section">
-        <div class="shell workflow-layout">
-          <div class="section-heading compact-heading">
-            <p class="eyebrow">Scan with context</p>
-            <h2>Progress that tells you what is happening.</h2>
+      <section class="section workflow-section" id="workflow">
+        <div class="shell">
+          <div class="section-heading">
+            <p class="eyebrow">Scan, inspect, clean up</p>
+            <h2>See the workflow before you install.</h2>
             <p>
-              File counts, scanned size, progress, and categorized access issues
-              stay visible while the scan runs.
+              Start a full local scan, watch progress update, then drag a cleanup
+              target into the delete area and confirm the exact file being removed.
             </p>
           </div>
-          <figure class="product-shot workflow-shot">
-            <img
-              src="screenshots/scan-progress.png"
-              width="1100"
-              height="600"
-              alt="DuckDisk scanning a local disk with file, size, percentage, and permission issue progress"
-              loading="lazy"
-            >
-          </figure>
+          <div class="demo-grid">
+            <figure class="product-shot workflow-shot">
+              <img
+                src="screenshots/local-scan.gif"
+                width="1000"
+                height="633"
+                alt="DuckDisk scanning a local disk from the start screen through the completed storage map"
+                loading="lazy"
+              >
+              <figcaption>
+                <strong>Full local scan</strong>
+                <span>Live file counts, scanned size, progress, and permission issues.</span>
+              </figcaption>
+            </figure>
+            <figure class="product-shot workflow-shot">
+              <img
+                src="screenshots/drag-remove.gif"
+                width="1000"
+                height="633"
+                alt="DuckDisk dragging a local file into the delete area and confirming permanent removal"
+                loading="lazy"
+              >
+              <figcaption>
+                <strong>Deliberate cleanup</strong>
+                <span>Drag, review, confirm, and immediately see the updated result.</span>
+              </figcaption>
+            </figure>
+          </div>
         </div>
       </section>
 
@@ -309,7 +328,7 @@
               <span>1</span>
               <div>
                 <h3>Download the DMG</h3>
-                <p>Get the Apple Silicon build from the v0.5.6 release.</p>
+                <p>Get the Apple Silicon build from the v0.5.7 release.</p>
               </div>
             </li>
             <li>
@@ -331,14 +350,14 @@
           <div class="install-actions">
             <a
               class="button button-primary"
-              href="https://github.com/qiyang77/duckdisk/releases/download/v0.5.6/DuckDisk_0.5.6_arm64.dmg"
+              href="https://github.com/qiyang77/duckdisk/releases/download/v0.5.7/DuckDisk_0.5.7_arm64.dmg"
               data-download
             >
-              Download DuckDisk v0.5.6
+              Download DuckDisk v0.5.7
             </a>
             <a
               class="button button-secondary"
-              href="https://github.com/qiyang77/duckdisk/releases/tag/v0.5.6"
+              href="https://github.com/qiyang77/duckdisk/releases/tag/v0.5.7"
             >
               View release notes
             </a>
@@ -403,7 +422,7 @@
           </div>
           <a
             class="button button-primary"
-            href="https://github.com/qiyang77/duckdisk/releases/download/v0.5.6/DuckDisk_0.5.6_arm64.dmg"
+            href="https://github.com/qiyang77/duckdisk/releases/download/v0.5.7/DuckDisk_0.5.7_arm64.dmg"
             data-download
           >
             Download for macOS
@@ -432,10 +451,6 @@
       </div>
       <div class="shell footer-bottom">
         <span>Copyright © 2026 Qi Yang. AGPL-3.0-or-later.</span>
-        <span>
-          With thanks to
-          <a href="https://github.com/adileo/squirreldisk">SquirrelDisk</a>.
-        </span>
       </div>
     </footer>
   </body>

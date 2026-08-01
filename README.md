@@ -13,17 +13,17 @@ The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
 Website: https://duckdisk.com/
 
-> **New in v0.5.6: smooth large directories and clearer disk capacity.** Local and OneDrive result trees now render only the visible rows, so expanding directories with tens of thousands of items stays responsive. Local disk cards also show used space alongside total capacity.
+> **New in v0.5.7: cloud cleanup, SSH scanning, and a smoother scan flow.** DuckDisk now supports Google Drive metadata scans and recoverable cleanup, improved OneDrive and SSH workflows, and more reliable scan startup and progress handling.
 
 ## Screenshots
 
-### Local and Cloud Storage
+### Scan a Local Disk
 
-![DuckDisk local disks and connected OneDrive storage](docs/screenshots/disk-list.png)
+![DuckDisk local disk scan demo](docs/screenshots/local-scan.gif)
 
-### Scan Progress
+### Drag to Remove Files
 
-![DuckDisk scan progress](docs/screenshots/scan-progress.png)
+![DuckDisk drag-to-remove demo](docs/screenshots/drag-remove.gif)
 
 ### Scan Results
 
