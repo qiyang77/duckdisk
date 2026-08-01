@@ -15,7 +15,7 @@ use oauth2::{
     RefreshToken, Scope, TokenResponse, TokenUrl,
 };
 use once_cell::sync::Lazy;
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::Manager;
@@ -167,6 +167,27 @@ struct FailedPayload {
     message: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteStatusPayload {
+    current: u64,
+    total: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoogleDriveDeleteFailure {
+    item_id: String,
+    message: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoogleDriveDeleteResult {
+    deleted_ids: Vec<String>,
+    failures: Vec<GoogleDriveDeleteFailure>,
+}
+
 pub fn get_state(app_handle: &tauri::AppHandle) -> Result<GoogleDriveState, String> {
     Ok(GoogleDriveState {
         configured: !client_id().is_empty(),
@@ -185,7 +206,7 @@ pub async fn connect_account(app_handle: &tauri::AppHandle) -> Result<GoogleDriv
         .authorize_url(CsrfToken::new_random)
         .set_pkce_challenge(pkce_challenge)
         .add_scope(Scope::new(
-            "https://www.googleapis.com/auth/drive.metadata.readonly".to_string(),
+            "https://www.googleapis.com/auth/drive.metadata".to_string(),
         ))
         .add_extra_param("access_type", "offline")
         .add_extra_param("prompt", "consent select_account")
@@ -237,6 +258,106 @@ pub fn disconnect_account(app_handle: &tauri::AppHandle, account_id: &str) -> Re
         fs::remove_file(path).map_err(|err| err.to_string())?;
     }
     Ok(())
+}
+
+pub async fn revoke_account(
+    app_handle: &tauri::AppHandle,
+    account_id: &str,
+) -> Result<(), String> {
+    let credential = read_credential(account_id)?;
+    let response = Client::new()
+        .post("https://oauth2.googleapis.com/revoke")
+        .form(&[("token", credential.refresh_token.as_str())])
+        .send()
+        .await
+        .map_err(|err| format!("Could not reach Google while revoking access: {err}"))?;
+
+    if !response.status().is_success() && response.status() != StatusCode::BAD_REQUEST {
+        return Err(format!(
+            "Google could not revoke DuckDisk access: {}",
+            response.status()
+        ));
+    }
+
+    disconnect_account(app_handle, account_id)
+}
+
+pub async fn trash_items(
+    app_handle: &tauri::AppHandle,
+    account_id: &str,
+    item_ids: Vec<String>,
+) -> Result<GoogleDriveDeleteResult, String> {
+    if item_ids.is_empty() {
+        return Ok(GoogleDriveDeleteResult {
+            deleted_ids: Vec::new(),
+            failures: Vec::new(),
+        });
+    }
+    if !read_accounts(app_handle)?
+        .iter()
+        .any(|account| account.id == account_id)
+    {
+        return Err("Google Drive account is not connected".to_string());
+    }
+
+    let mut access_token = refresh_access_token(account_id).await?;
+    let http = Client::new();
+    let total = item_ids.len() as u64;
+    let mut deleted_ids = Vec::new();
+    let mut failures = Vec::new();
+
+    for (index, item_id) in item_ids.into_iter().enumerate() {
+        let mut result = google_trash_item(&http, &access_token, &item_id).await;
+        if result
+            .as_ref()
+            .err()
+            .map(|message| is_authentication_error(message))
+            .unwrap_or(false)
+        {
+            result = match refresh_access_token(account_id).await {
+                Ok(refreshed_token) => {
+                    access_token = refreshed_token;
+                    google_trash_item(&http, &access_token, &item_id).await
+                }
+                Err(err) => Err(err),
+            };
+        }
+
+        match result {
+            Ok(()) => deleted_ids.push(item_id),
+            Err(message) => failures.push(GoogleDriveDeleteFailure { item_id, message }),
+        }
+        app_handle
+            .emit_all(
+                "googledrive_delete_status",
+                DeleteStatusPayload {
+                    current: index as u64 + 1,
+                    total,
+                },
+            )
+            .ok();
+    }
+
+    if !deleted_ids.is_empty() {
+        let path = cache_path(app_handle, account_id)?;
+        if let Some(mut cache) = read_cache(&path, account_id) {
+            for item_id in &deleted_ids {
+                remove_cached_subtree(&mut cache, item_id);
+            }
+            if write_cache(&path, &cache).is_err() {
+                fs::remove_file(path).ok();
+            }
+        }
+
+        if let Ok(about) = fetch_about(&http, &access_token).await {
+            upsert_account(app_handle, account_from_about(&about)).ok();
+        }
+    }
+
+    Ok(GoogleDriveDeleteResult {
+        deleted_ids,
+        failures,
+    })
 }
 
 pub fn start_scan(
@@ -516,6 +637,101 @@ async fn google_response<T: DeserializeOwned>(response: Result<reqwest::Response
     serde_json::from_str(&body).map_err(|err| format!("Invalid Google Drive response: {err}"))
 }
 
+async fn google_trash_item(
+    http: &Client,
+    access_token: &str,
+    item_id: &str,
+) -> Result<(), String> {
+    let mut url = Url::parse(&format!("{API_ROOT}/files/"))
+        .map_err(|err| err.to_string())?;
+    url.path_segments_mut()
+        .map_err(|_| "Could not build Google Drive item URL".to_string())?
+        .push(item_id);
+    url.query_pairs_mut().append_pair("supportsAllDrives", "true");
+
+    let mut attempts = 0_u32;
+    loop {
+        let response = match http
+            .patch(url.as_str())
+            .bearer_auth(access_token)
+            .json(&json!({ "trashed": true }))
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(err) if (err.is_connect() || err.is_timeout()) && attempts < 5 => {
+                attempts += 1;
+                tokio::time::sleep(Duration::from_secs(2_u64.pow(attempts).min(30))).await;
+                continue;
+            }
+            Err(err) => {
+                return Err(format!(
+                    "Could not reach Google Drive while moving the item to Trash: {err}"
+                ))
+            }
+        };
+        let status = response.status();
+        if status.is_success() || status == StatusCode::NOT_FOUND {
+            return Ok(());
+        }
+        if is_retryable_delete_status(status) {
+            attempts += 1;
+            if attempts > 5 {
+                let body = response.text().await.unwrap_or_default();
+                return Err(google_error_message(status, &body));
+            }
+            let delay = response
+                .headers()
+                .get("retry-after")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(2_u64.pow(attempts));
+            tokio::time::sleep(Duration::from_secs(delay.min(60))).await;
+            continue;
+        }
+        let body = response.text().await.unwrap_or_default();
+        let message = google_error_message(status, &body);
+        if status == StatusCode::FORBIDDEN
+            && message.to_ascii_lowercase().contains("insufficient")
+        {
+            return Err(
+                "Reconnect Google Drive from All Disks to grant permission to move items to Trash."
+                    .to_string(),
+            );
+        }
+        return Err(message);
+    }
+}
+
+fn is_retryable_delete_status(status: StatusCode) -> bool {
+    matches!(status.as_u16(), 408 | 409 | 429 | 500 | 502 | 503 | 504)
+}
+
+fn is_authentication_error(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("401 unauthorized")
+        || message.contains("invalid credentials")
+        || message.contains("invalid_grant")
+}
+
+fn google_error_message(status: StatusCode, body: &str) -> String {
+    let message = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .filter(|message| !message.trim().is_empty());
+
+    match message {
+        Some(message) => format!("Google Drive returned {status}: {message}"),
+        None => format!("Google Drive returned {status}"),
+    }
+}
+
 async fn refresh_access_token(account_id: &str) -> Result<String, String> {
     let credential = read_credential(account_id)?;
     let token = oauth_client(&required_client_id()?, None)?
@@ -619,6 +835,27 @@ fn write_cache(path: &Path, cache: &GoogleDriveCache) -> Result<(), String> {
     fs::rename(temporary, path).map_err(|err| err.to_string())
 }
 
+fn remove_cached_subtree(cache: &mut GoogleDriveCache, root_id: &str) {
+    let mut removed = HashSet::from([root_id.to_string()]);
+    loop {
+        let before = removed.len();
+        for item in cache.items.values() {
+            if item
+                .parent_id
+                .as_ref()
+                .map(|parent_id| removed.contains(parent_id))
+                .unwrap_or(false)
+            {
+                removed.insert(item.id.clone());
+            }
+        }
+        if removed.len() == before {
+            break;
+        }
+    }
+    cache.items.retain(|item_id, _| !removed.contains(item_id));
+}
+
 fn write_scan_result(content: &str) -> Result<PathBuf, String> {
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
     let path = std::env::temp_dir().join(format!("duckdisk-google-drive-scan-{}-{stamp}.json", std::process::id()));
@@ -708,5 +945,30 @@ mod tests {
         let result: Value = serde_json::from_str(&build_scan_json(&cache, &account).unwrap()).unwrap();
         assert_eq!(result["tree"]["size"], 50);
         assert_eq!(result["tree"]["children"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn removes_google_drive_cached_subtree() {
+        let mut items = HashMap::new();
+        items.insert("root".to_string(), item("root", None, "My Drive", 0, true));
+        items.insert("folder".to_string(), item("folder", Some("root"), "Work", 0, true));
+        items.insert("nested".to_string(), item("nested", Some("folder"), "Drafts", 0, true));
+        items.insert("file".to_string(), item("file", Some("nested"), "notes.txt", 42, false));
+        items.insert("keep".to_string(), item("keep", Some("root"), "keep.pdf", 8, false));
+        let mut cache = GoogleDriveCache {
+            version: CACHE_VERSION.to_string(),
+            account_id: "account".to_string(),
+            root_id: "root".to_string(),
+            page_token: "token".to_string(),
+            items,
+        };
+
+        remove_cached_subtree(&mut cache, "folder");
+
+        assert!(cache.items.contains_key("root"));
+        assert!(cache.items.contains_key("keep"));
+        assert!(!cache.items.contains_key("folder"));
+        assert!(!cache.items.contains_key("nested"));
+        assert!(!cache.items.contains_key("file"));
     }
 }

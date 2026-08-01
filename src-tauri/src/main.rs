@@ -60,8 +60,10 @@ fn main() {
             get_google_drive_state,
             connect_google_drive_account,
             disconnect_google_drive_account,
+            revoke_google_drive_account,
             start_google_drive_scan,
             read_google_drive_scan_result,
+            delete_google_drive_items,
             get_ssh_connections,
             save_ssh_connection,
             remove_ssh_connection,
@@ -259,6 +261,14 @@ fn disconnect_google_drive_account(
 }
 
 #[tauri::command]
+async fn revoke_google_drive_account(
+    app_handle: tauri::AppHandle,
+    account_id: String,
+) -> Result<(), String> {
+    google_drive::revoke_account(&app_handle, &account_id).await
+}
+
+#[tauri::command]
 fn start_google_drive_scan(
     app_handle: tauri::AppHandle,
     account_id: String,
@@ -270,6 +280,15 @@ fn start_google_drive_scan(
 #[tauri::command]
 fn read_google_drive_scan_result(path: String) -> Result<String, String> {
     google_drive::read_scan_result(&path)
+}
+
+#[tauri::command]
+async fn delete_google_drive_items(
+    app_handle: tauri::AppHandle,
+    account_id: String,
+    item_ids: Vec<String>,
+) -> Result<google_drive::GoogleDriveDeleteResult, String> {
+    google_drive::trash_items(&app_handle, &account_id, item_ids).await
 }
 
 #[tauri::command]

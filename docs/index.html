@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>DuckDisk - Disk and OneDrive space analyzer for macOS</title>
+    <title>DuckDisk - Disk and cloud storage analyzer for macOS</title>
     <meta
       name="description"
-      content="DuckDisk is an open-source disk and OneDrive space analyzer for macOS. Find large folders, inspect file types, refresh changed paths, and clean up storage from one dense view."
+      content="DuckDisk is an open-source disk and cloud storage analyzer for macOS. Find large folders, inspect file types, and manage local, OneDrive, and Google Drive storage from one dense view."
     >
     <meta name="robots" content="index, follow">
     <meta name="theme-color" content="#11130f">
@@ -17,7 +17,7 @@
     <meta property="og:title" content="DuckDisk - See where your storage went">
     <meta
       property="og:description"
-      content="A table-first macOS disk analyzer with OneDrive metadata scanning, targeted refresh, and deliberate cleanup tools."
+      content="A table-first macOS disk analyzer with local, OneDrive, Google Drive, and SSH storage scanning."
     >
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://duckdisk.com/">
@@ -26,10 +26,10 @@
     <meta property="og:image:height" content="733">
     <meta property="og:site_name" content="DuckDisk">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="DuckDisk - Disk and OneDrive analyzer for macOS">
+    <meta name="twitter:title" content="DuckDisk - Disk and cloud storage analyzer for macOS">
     <meta
       name="twitter:description"
-      content="Find large folders and files on local disks and OneDrive without downloading cloud contents."
+      content="Find large folders and files on local disks, OneDrive, and Google Drive without downloading cloud contents."
     >
     <meta name="twitter:image" content="https://duckdisk.com/screenshots/scan-results.png">
 
@@ -41,7 +41,7 @@
         "applicationCategory": "UtilitiesApplication",
         "operatingSystem": "macOS",
         "softwareVersion": "0.5.6",
-        "description": "Open-source disk and OneDrive space analyzer for macOS.",
+        "description": "Open-source disk and cloud storage analyzer for macOS.",
         "url": "https://duckdisk.com/",
         "image": "https://duckdisk.com/assets/duckdisk-icon.png",
         "downloadUrl": "https://github.com/qiyang77/duckdisk/releases/download/v0.5.6/DuckDisk_0.5.6_arm64.dmg",
@@ -74,8 +74,8 @@
         </a>
         <div class="nav-links">
           <a href="#features">Features</a>
-          <a href="#onedrive">OneDrive</a>
-          <a href="#privacy">Privacy</a>
+          <a href="#cloud">Cloud</a>
+          <a href="privacy.html">Privacy</a>
           <a href="#install">Install</a>
         </div>
         <a
@@ -95,8 +95,8 @@
           <p class="eyebrow">Disk and cloud storage analyzer for macOS</p>
           <h1 id="hero-title">DuckDisk</h1>
           <p class="hero-copy">
-            See where your storage went. Scan local disks and OneDrive, compare
-            folders and file types, then clean up with confidence.
+            See where your storage went. Scan local disks, OneDrive, Google Drive,
+            and SSH storage, then clean up with confidence.
           </p>
           <div class="hero-actions">
             <a
@@ -204,21 +204,21 @@
         </div>
       </section>
 
-      <section class="section cloud-section" id="onedrive">
+      <section class="section cloud-section" id="cloud">
         <div class="shell cloud-layout">
           <div class="cloud-copy">
-            <p class="eyebrow">OneDrive analysis</p>
+            <p class="eyebrow">Cloud storage analysis</p>
             <h2>Your cloud storage, without the download.</h2>
             <p>
-              Connect a Microsoft account and DuckDisk scans OneDrive metadata
-              through Microsoft Graph. Large cloud libraries can be analyzed
+              Connect OneDrive or Google Drive and DuckDisk scans storage metadata
+              through the provider API. Large cloud libraries can be analyzed
               without making every file available offline.
             </p>
             <ul class="check-list">
               <li>Metadata-only full scans with resumable checkpoints</li>
               <li>Delta updates from the last completed cloud scan</li>
-              <li>Folder-level refresh from the result table</li>
-              <li>Move selected items to the OneDrive Recycle Bin</li>
+              <li>Fast follow-up scans from provider change records</li>
+              <li>Move selected items to the provider's recoverable trash</li>
             </ul>
             <a
               class="text-link"
@@ -232,12 +232,12 @@
               src="screenshots/disk-list.png"
               width="1100"
               height="600"
-              alt="DuckDisk start screen showing a local Mac disk and a connected OneDrive account"
+              alt="DuckDisk start screen showing local disks and connected cloud storage accounts"
               loading="lazy"
             >
             <figcaption>
               <strong>One start screen</strong>
-              <span>Choose a local disk, a folder, or a connected OneDrive account.</span>
+              <span>Choose a local disk, folder, OneDrive, Google Drive, or SSH connection.</span>
             </figcaption>
           </figure>
         </div>
@@ -282,8 +282,8 @@
             <article>
               <h3>Cloud access is explicit</h3>
               <p>
-                OneDrive uses Microsoft OAuth. Refresh credentials are stored
-                in macOS Keychain, not in the project folder.
+                OneDrive and Google Drive use provider OAuth. Refresh credentials
+                are stored in macOS Keychain, not in the project folder.
               </p>
             </article>
             <article>
@@ -377,17 +377,17 @@
               </p>
             </details>
             <details>
-              <summary>Does OneDrive scanning download my files?</summary>
+              <summary>Does cloud scanning download my files?</summary>
               <p>
-                No. DuckDisk reads file and folder metadata from Microsoft Graph.
-                File contents are not downloaded for storage analysis.
+                No. DuckDisk reads file and folder metadata from Microsoft Graph
+                or Google Drive API. File contents are not downloaded for analysis.
               </p>
             </details>
             <details>
-              <summary>What happens when I delete a OneDrive item?</summary>
+              <summary>What happens when I delete a cloud item?</summary>
               <p>
-                DuckDisk asks Microsoft Graph to move the selected item to the
-                OneDrive Recycle Bin, where it can normally be restored.
+                DuckDisk asks the provider to move the selected item to OneDrive's
+                Recycle Bin or Google Drive Trash, where it can normally be restored.
               </p>
             </details>
           </div>
@@ -426,6 +426,8 @@
           <a href="https://github.com/qiyang77/duckdisk/releases">Releases</a>
           <a href="https://github.com/qiyang77/duckdisk/issues">Issues</a>
           <a href="https://github.com/qiyang77/duckdisk/blob/main/SECURITY.md">Security</a>
+          <a href="privacy.html">Privacy</a>
+          <a href="terms.html">Terms</a>
         </div>
       </div>
       <div class="shell footer-bottom">

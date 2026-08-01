@@ -92,7 +92,7 @@ type DeleteState = {
   error: string | null;
 };
 
-type OneDriveDeleteResult = {
+type CloudDeleteResult = {
   deletedIds: string[];
   failures: Array<{
     itemId: string;
@@ -532,7 +532,7 @@ const Scanning = () => {
   const isSsh = source === "ssh";
   const isCloud = source !== "local";
   const requiresKeychainApproval = isOneDrive || isGoogleDrive;
-  const canDelete = !isCloud || isOneDrive;
+  const canDelete = !isSsh;
   const canRefreshItem = !isCloud || isOneDrive;
   const providerName = isOneDrive
     ? "OneDrive"
@@ -551,6 +551,9 @@ const Scanning = () => {
     : isSsh
     ? "ssh"
     : "onedrive";
+  const cloudTrashName = isGoogleDrive
+    ? "Google Drive Trash"
+    : "OneDrive Recycle Bin";
   const ratio = "0";
 
   const worker = useRef<Worker | null>(null);
@@ -740,7 +743,7 @@ const Scanning = () => {
     });
 
     const unlistenDeleteStatus = listen(
-      "onedrive_delete_status",
+      `${cloudEventPrefix}_delete_status`,
       (event: any) => {
         const payload = event.payload as { current: number; total: number };
         setDeleteState((current) => ({
@@ -1194,10 +1197,10 @@ const Scanning = () => {
     const failedItems: DiskItem[] = [];
     let cloudFailureMessage: string | null = null;
 
-    if (isOneDrive) {
+    if (isOneDrive || isGoogleDrive) {
       try {
-        const result = await invoke<OneDriveDeleteResult>(
-          "delete_onedrive_items",
+        const result = await invoke<CloudDeleteResult>(
+          isGoogleDrive ? "delete_google_drive_items" : "delete_onedrive_items",
           {
             accountId,
             itemIds: deleteList
@@ -1834,8 +1837,8 @@ const Scanning = () => {
             }`}
           >
             {deleteList.length === 0 ? (
-              isOneDrive
-                ? "Drag files or folders here to move them to the OneDrive Recycle Bin"
+              isCloud
+                ? `Drag files or folders here to move them to ${cloudTrashName}`
                 : "Drag files or folders here to delete"
             ) : (
               <div className="truncate text-left text-slate-200">
@@ -1853,7 +1856,7 @@ const Scanning = () => {
                   }
                 >
                   {deleteState.error ||
-                    (isOneDrive ? "Moving to Recycle Bin" : "Deleting")}
+                    (isCloud ? `Moving to ${cloudTrashName}` : "Deleting")}
                 </span>
                 <span>
                   {deleteState.current}/{deleteState.total}
@@ -1902,11 +1905,11 @@ const Scanning = () => {
             >
               {!deleteState.isDeleting && <Trash2 size={14} />}
               {deleteState.isDeleting
-                ? `${isOneDrive ? "Moving" : "Deleting"} ${
+                ? `${isCloud ? "Moving" : "Deleting"} ${
                     deleteState.current
                   }/${deleteState.total}`
-                : isOneDrive
-                ? "Move to Recycle Bin"
+                : isCloud
+                ? "Move to Trash"
                 : "Delete"}
             </button>
           </div>
@@ -1984,7 +1987,7 @@ const Scanning = () => {
                 }}
                 className="context-menu-item context-menu-item-danger"
               >
-                {isOneDrive ? "Add to Recycle Bin List" : "Add to Delete List"}
+                {isCloud ? "Add to Trash List" : "Add to Delete List"}
               </button>
             </>
           )}

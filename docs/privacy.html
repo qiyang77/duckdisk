@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Privacy Policy - DuckDisk</title>
+    <meta name="description" content="DuckDisk privacy policy for local disk, OneDrive, Google Drive, and SSH storage analysis.">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://duckdisk.com/privacy.html">
+    <link rel="icon" type="image/png" href="assets/duckdisk-icon.png">
+    <link rel="stylesheet" href="styles.css">
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header" data-header>
+      <nav class="nav shell" aria-label="Primary navigation">
+        <a class="brand" href="index.html" aria-label="DuckDisk home">
+          <img src="assets/duckdisk-icon.png" width="42" height="42" alt="">
+          <span>DuckDisk</span>
+        </a>
+        <div class="nav-links">
+          <a href="index.html#features">Features</a>
+          <a href="index.html#cloud">Cloud</a>
+          <a href="terms.html">Terms</a>
+        </div>
+        <a class="button button-small button-primary" href="https://github.com/qiyang77/duckdisk/releases">Download</a>
+      </nav>
+    </header>
+    <main id="main" class="legal-main">
+      <div class="shell">
+        <header class="legal-heading">
+          <p class="eyebrow">DuckDisk legal</p>
+          <h1>Privacy Policy</h1>
+          <p>How DuckDisk handles local storage data and connected cloud accounts.</p>
+          <div class="legal-updated">Effective August 1, 2026</div>
+        </header>
+        <article class="legal-content">
+          <section>
+            <h2>Overview</h2>
+            <p>DuckDisk is a local-first, open-source macOS application operated by Qi Yang. DuckDisk does not operate a server that receives your disk scan results, cloud file metadata, or OAuth credentials.</p>
+          </section>
+          <section>
+            <h2>Data DuckDisk accesses</h2>
+            <ul>
+              <li>Local and SSH file metadata, including names, paths, sizes, types, and folder relationships.</li>
+              <li>OneDrive and Google Drive account details such as display name, email address, account identifier, and storage quota.</li>
+              <li>Cloud file metadata such as item identifiers, names, sizes, MIME types, parent relationships, and trash state.</li>
+              <li>OAuth refresh tokens needed to reconnect to a cloud account.</li>
+            </ul>
+            <p>DuckDisk does not download cloud file contents to calculate storage usage.</p>
+          </section>
+          <section>
+            <h2>How data is used and stored</h2>
+            <p>Metadata is used only to build the storage tree, calculate totals, update cached results, and perform actions you explicitly request. OAuth refresh tokens are stored in macOS Keychain. Scan indexes and connected-account records are stored locally on your Mac.</p>
+          </section>
+          <section>
+            <h2>Cloud actions</h2>
+            <p>When you choose to remove an item, DuckDisk asks Microsoft OneDrive or Google Drive to move that item to the provider's recoverable trash. DuckDisk does not permanently empty provider trash. No cloud item is changed without a user-initiated action.</p>
+          </section>
+          <section>
+            <h2>Sharing and selling</h2>
+            <p>DuckDisk does not sell personal data, use cloud account data for advertising, or share scan data with data brokers. Requests are sent directly from the app to Microsoft, Google, or the SSH server you configured. Those providers process requests under their own privacy policies.</p>
+          </section>
+          <section>
+            <h2>Google API data</h2>
+            <p>DuckDisk's use and transfer of information received from Google APIs complies with the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+          </section>
+          <section>
+            <h2>Retention and deletion</h2>
+            <p>Local scan caches remain until you clean the cache, disconnect the account, uninstall and remove DuckDisk's application data, or replace them with a new scan. Revoking Google Drive access from DuckDisk invalidates the saved Google token and removes that account and its cache from the Mac.</p>
+          </section>
+          <section>
+            <h2>Website and updates</h2>
+            <p>The DuckDisk website does not include DuckDisk-operated analytics or advertising trackers. The hosting provider and GitHub may process standard connection logs under their own policies. The app contacts GitHub only when you request an update check.</p>
+          </section>
+          <section>
+            <h2>Contact</h2>
+            <p>Questions or privacy requests can be sent to <a href="mailto:qiyang577@gmail.com">qiyang577@gmail.com</a> or filed through the <a href="https://github.com/qiyang77/duckdisk/issues">DuckDisk issue tracker</a>.</p>
+          </section>
+        </article>
+      </div>
+    </main>
+    <footer class="site-footer">
+      <div class="shell footer-grid">
+        <div class="footer-brand"><img src="assets/duckdisk-icon.png" width="44" height="44" alt=""><div><strong>DuckDisk</strong><span>Disk and cloud storage analysis for macOS.</span></div></div>
+        <div class="footer-links"><a href="index.html">Home</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a><a href="https://github.com/qiyang77/duckdisk">Source</a></div>
+      </div>
+    </footer>
+  </body>
+</html>

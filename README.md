@@ -32,13 +32,13 @@ Website: https://duckdisk.com/
 ## Features
 
 - **OneDrive cloud analysis** using file metadata only, without downloading file contents.
-- **Google Drive analysis** with OAuth, metadata-only scanning, and incremental change tracking.
+- **Google Drive analysis** with OAuth, metadata-only scanning, incremental change tracking, and move-to-Trash cleanup.
 - **SSH remote path analysis** through macOS `ssh`, existing keys, and `~/.ssh/config`.
 - **Fast incremental cloud refreshes** using Microsoft Graph delta updates and a local metadata cache.
-- **OneDrive cleanup** that moves selected files and folders to the Recycle Bin.
+- **Recoverable cloud cleanup** that moves selected OneDrive and Google Drive items to provider trash.
 - **Dense tree view** with folder/file counts, sizes, allocated size, and parent percentage.
 - **Virtualized large directories** that keep local and remote result tables responsive.
-- **Drag-to-delete** cleanup for local and OneDrive scan results.
+- **Drag-to-delete** cleanup for local, OneDrive, and Google Drive scan results.
 - File type summary with extension totals and percentages.
 - Finder integration for revealing files and folders.
 
@@ -55,7 +55,9 @@ If macOS prompts for permissions during a scan, denied or previously blocked rea
 
 OneDrive scans use Microsoft account authorization and request `Files.ReadWrite` so selected files and folders can be moved to the OneDrive Recycle Bin. DuckDisk does not permanently delete cloud items. Refresh tokens are stored in macOS Keychain; cached scan metadata is stored in DuckDisk's application cache.
 
-Google Drive scans request read-only metadata access and do not download file contents. SSH scans are read-only and use the system `ssh` command; configure key-based login before adding a connection in DuckDisk.
+Google Drive scans request the `drive.metadata` scope so DuckDisk can read metadata and move user-selected items to Google Drive Trash. File contents are not downloaded. Tokens are stored in macOS Keychain, and the app can revoke Google authorization and remove its local account cache. SSH scans are read-only and use the system `ssh` command; configure key-based login before adding a connection in DuckDisk.
+
+See the [Privacy Policy](https://duckdisk.com/privacy.html) and [Terms of Use](https://duckdisk.com/terms.html).
 
 ## Installation
 

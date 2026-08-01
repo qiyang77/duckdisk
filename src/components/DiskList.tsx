@@ -89,6 +89,9 @@ const DiskList = () => {
   });
   const [sshConnections, setSshConnections] = useState<SshConnection[]>([]);
   const [showSshDialog, setShowSshDialog] = useState(false);
+  const [showCloudPrivacy, setShowCloudPrivacy] = useState(false);
+  const [googleAccountToRevoke, setGoogleAccountToRevoke] =
+    useState<GoogleDriveAccount | null>(null);
   const [sshDraft, setSshDraft] = useState({
     name: "",
     host: "",
@@ -183,12 +186,14 @@ const DiskList = () => {
     }
   };
 
-  const disconnectGoogleDrive = async (account: GoogleDriveAccount) => {
+  const revokeGoogleDrive = async (account: GoogleDriveAccount) => {
     setCloudBusy(`google-${account.id}`);
     setCloudError(null);
     try {
-      await invoke("disconnect_google_drive_account", { accountId: account.id });
+      await invoke("revoke_google_drive_account", { accountId: account.id });
       await syncGoogleDrive();
+      setGoogleAccountToRevoke(null);
+      setShowCloudPrivacy(false);
     } catch (error) {
       setCloudError(String(error));
     } finally {
@@ -294,6 +299,14 @@ const DiskList = () => {
               <p>OneDrive and Google Drive metadata scanning</p>
             </div>
             <div className="section-actions">
+              <button
+                type="button"
+                onClick={() => setShowCloudPrivacy(true)}
+                className="button button-secondary"
+              >
+                <ShieldCheck size={14} />
+                Privacy & Access
+              </button>
               <button
                 type="button"
                 onClick={connectOneDrive}
@@ -474,10 +487,12 @@ const DiskList = () => {
                         <button
                           type="button"
                           className="icon-button icon-button-danger"
-                          title={`Disconnect Google Drive - ${account.name}`}
+                          title={`Revoke Google Drive access - ${account.name}`}
+                          aria-label={`Revoke Google Drive access - ${account.name}`}
                           onClick={(event) => {
                             event.stopPropagation();
-                            disconnectGoogleDrive(account);
+                            setGoogleAccountToRevoke(account);
+                            setShowCloudPrivacy(true);
                           }}
                           disabled={cloudBusy !== null}
                         >
@@ -581,6 +596,103 @@ const DiskList = () => {
                   Save Connection
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {showCloudPrivacy && (
+        <div className="modal-backdrop">
+          <div
+            className="app-dialog w-full max-w-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cloud-privacy-title"
+          >
+            <div className="dialog-header">
+              <div>
+                <div id="cloud-privacy-title" className="text-sm font-semibold text-white">
+                  Cloud Privacy & Account Access
+                </div>
+                <div className="mt-1 text-xs text-slate-400">
+                  What DuckDisk reads, stores, and can change
+                </div>
+              </div>
+              <button
+                className="icon-button"
+                title="Close"
+                onClick={() => {
+                  setShowCloudPrivacy(false);
+                  setGoogleAccountToRevoke(null);
+                }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <div className="space-y-4 p-5 text-sm text-slate-300">
+              <p>
+                DuckDisk reads file and folder metadata to calculate storage use.
+                It does not download cloud file contents for analysis.
+              </p>
+              <p>
+                Sign-in tokens are stored in macOS Keychain and scan metadata is
+                cached only on this Mac. DuckDisk does not operate an account-data server.
+              </p>
+              <p>
+                Deleting from a cloud scan moves the selected item to OneDrive's
+                Recycle Bin or Google Drive Trash, where the provider may allow recovery.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => openExternal("https://duckdisk.com/privacy.html")}
+                >
+                  <ExternalLink size={14} />
+                  Privacy Policy
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => openExternal("https://duckdisk.com/terms.html")}
+                >
+                  <ExternalLink size={14} />
+                  Terms
+                </button>
+              </div>
+              {googleAccountToRevoke && (
+                <div className="rounded border border-red-400/30 bg-red-950/20 p-4">
+                  <div className="font-semibold text-red-100">
+                    Revoke Google Drive access for {googleAccountToRevoke.email}?
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-red-200/80">
+                    This invalidates DuckDisk's Google token and removes the saved
+                    account and scan cache from this Mac. Your Drive files are not deleted.
+                  </p>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => setGoogleAccountToRevoke(null)}
+                      disabled={cloudBusy !== null}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-danger"
+                      onClick={() => revokeGoogleDrive(googleAccountToRevoke)}
+                      disabled={cloudBusy !== null}
+                    >
+                      {cloudBusy === `google-${googleAccountToRevoke.id}` ? (
+                        <RefreshCw size={14} className="animate-spin" />
+                      ) : (
+                        <Unplug size={14} />
+                      )}
+                      Revoke Access
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
