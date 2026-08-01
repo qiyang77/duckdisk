@@ -72,8 +72,14 @@ jobs:
               "https://duckdisk.com/?deploy=$GITHUB_SHA" \
               --output /tmp/duckdisk-home.html \
               && grep -q 'See where your storage went' /tmp/duckdisk-home.html; then
-              echo "https://duckdisk.com is serving the new release"
-              exit 0
+              remote_hash="$(curl --fail --silent --show-error \
+                "https://duckdisk.com/screenshots/scan-results.png?deploy=$GITHUB_SHA" \
+                | sha256sum | cut -d ' ' -f 1)"
+              expected_hash="$(sha256sum docs/screenshots/scan-results.png | cut -d ' ' -f 1)"
+              if [ "$remote_hash" = "$expected_hash" ]; then
+                echo "https://duckdisk.com is serving the new release"
+                exit 0
+              fi
             fi
             sleep 5
           done
