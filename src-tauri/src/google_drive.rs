@@ -5,14 +5,17 @@ use std::io::{ErrorKind, Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use oauth2::basic::BasicClient;
 use oauth2::reqwest::async_http_client;
 use oauth2::{
-    AuthType, AuthUrl, AuthorizationCode, ClientId, CsrfToken, PkceCodeChallenge, RedirectUrl,
-    RefreshToken, Scope, TokenResponse, TokenUrl,
+    AuthType, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
+    RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
 };
 use once_cell::sync::Lazy;
 use reqwest::{Client, StatusCode};
@@ -24,9 +27,13 @@ use url::Url;
 const API_ROOT: &str = "https://www.googleapis.com/drive/v3";
 const KEYCHAIN_SERVICE: &str = "com.duckdisk.dev.googledrive";
 const CACHE_VERSION: &str = "duckdisk-google-drive-cache-v1";
-const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
+const CALLBACK_TIMEOUT: Duration = Duration::from_secs(120);
+const USER_CAP_MESSAGE: &str = "Google Drive sign-in is temporarily unavailable because DuckDisk has reached Google's 100-user limit. Please check for a newer DuckDisk release or try again after the app completes Google verification.";
+const SCAN_CANCELLED_MESSAGE: &str = "Google Drive scan cancelled.";
 
 static ACTIVE_SCANS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+static CANCELLED_SCANS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+static OAUTH_CANCELLED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,7 +45,6 @@ pub struct GoogleDriveAccount {
     pub used_space: u64,
     pub available_space: u64,
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoogleDriveState {
@@ -190,17 +196,19 @@ pub struct GoogleDriveDeleteResult {
 
 pub fn get_state(app_handle: &tauri::AppHandle) -> Result<GoogleDriveState, String> {
     Ok(GoogleDriveState {
-        configured: !client_id().is_empty(),
+        configured: !client_id().is_empty() && !client_secret().is_empty(),
         accounts: read_accounts(app_handle)?,
     })
 }
 
 pub async fn connect_account(app_handle: &tauri::AppHandle) -> Result<GoogleDriveAccount, String> {
+    OAUTH_CANCELLED.store(false, Ordering::SeqCst);
     let client_id = required_client_id()?;
+    let client_secret = required_client_secret()?;
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|err| err.to_string())?;
     let port = listener.local_addr().map_err(|err| err.to_string())?.port();
     let redirect = format!("http://127.0.0.1:{port}");
-    let oauth_client = oauth_client(&client_id, Some(&redirect))?;
+    let oauth_client = oauth_client(&client_id, &client_secret, Some(&redirect))?;
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
     let (authorize_url, csrf_token) = oauth_client
         .authorize_url(CsrfToken::new_random)
@@ -229,7 +237,7 @@ pub async fn connect_account(app_handle: &tauri::AppHandle) -> Result<GoogleDriv
         .set_pkce_verifier(pkce_verifier)
         .request_async(async_http_client)
         .await
-        .map_err(|err| format!("Google sign-in failed: {err}"))?;
+        .map_err(|err| google_token_error_message(&format!("{err:?}")))?;
     let refresh_token = token
         .refresh_token()
         .ok_or_else(|| "Google did not return a refresh token".to_string())?
@@ -242,6 +250,10 @@ pub async fn connect_account(app_handle: &tauri::AppHandle) -> Result<GoogleDriv
     store_credential(&account.id, &refresh_token)?;
     upsert_account(app_handle, account.clone())?;
     Ok(account)
+}
+
+pub fn cancel_connection() {
+    OAUTH_CANCELLED.store(true, Ordering::SeqCst);
 }
 
 pub fn disconnect_account(app_handle: &tauri::AppHandle, account_id: &str) -> Result<(), String> {
@@ -374,6 +386,7 @@ pub fn start_scan(
             return Ok(());
         }
     }
+    CANCELLED_SCANS.lock().unwrap_or_else(|item| item.into_inner()).remove(&account_id);
     tauri::async_runtime::spawn(async move {
         match scan_account(&app_handle, &account_id, force_full).await {
             Ok(path) => {
@@ -386,6 +399,7 @@ pub fn start_scan(
                     },
                 ).ok();
             }
+            Err(message) if message == SCAN_CANCELLED_MESSAGE => {}
             Err(message) => {
                 app_handle.emit_all(
                     "googledrive_scan_failed",
@@ -394,8 +408,18 @@ pub fn start_scan(
             }
         }
         ACTIVE_SCANS.lock().unwrap_or_else(|item| item.into_inner()).remove(&account_id);
+        CANCELLED_SCANS.lock().unwrap_or_else(|item| item.into_inner()).remove(&account_id);
     });
     Ok(())
+}
+
+pub fn stop_scan(account_id: &str) {
+    if ACTIVE_SCANS.lock().unwrap_or_else(|item| item.into_inner()).contains(account_id) {
+        CANCELLED_SCANS
+            .lock()
+            .unwrap_or_else(|item| item.into_inner())
+            .insert(account_id.to_string());
+    }
 }
 
 pub fn read_scan_result(path: &str) -> Result<String, String> {
@@ -415,6 +439,7 @@ async fn scan_account(
     account_id: &str,
     force_full: bool,
 ) -> Result<PathBuf, String> {
+    ensure_scan_active(account_id)?;
     let access_token = refresh_access_token(account_id).await?;
     let http = Client::new();
     let about = fetch_about(&http, &access_token).await?;
@@ -431,6 +456,7 @@ async fn scan_account(
         },
         None => full_scan(app_handle, &http, &access_token, account_id).await?,
     };
+    ensure_scan_active(account_id)?;
     write_cache(&path, &cache)?;
     app_handle.emit_all(
         "googledrive_scan_finalizing",
@@ -462,7 +488,9 @@ async fn full_scan(
     items.insert(root_id.clone(), cached_item(root));
     let mut page_token: Option<String> = None;
     let mut count = 0_u64;
+    let mut total = 0_u64;
     loop {
+        ensure_scan_active(account_id)?;
         let mut request = http.get(&format!("{API_ROOT}/files"))
             .bearer_auth(access_token)
             .query(&[
@@ -475,13 +503,18 @@ async fn full_scan(
             request = request.query(&[("pageToken", token)]);
         }
         let page: FilePage = google_response(request.send().await).await?;
+        ensure_scan_active(account_id)?;
         for file in page.files {
             if file.id != root_id {
-                items.insert(file.id.clone(), cached_item(file));
+                let item = cached_item(file);
+                if !item.is_folder {
+                    total = total.saturating_add(item.size);
+                }
+                items.insert(item.id.clone(), item);
                 count += 1;
             }
         }
-        emit_status(app_handle, account_id, count);
+        emit_status(app_handle, account_id, count, total);
         page_token = page.next_page_token;
         if page_token.is_none() { break; }
     }
@@ -511,7 +544,9 @@ async fn incremental_scan(
     ).ok();
     let mut token = cache.page_token.clone();
     let mut count = 0_u64;
+    let mut total = 0_u64;
     loop {
+        ensure_scan_active(&cache.account_id)?;
         let request = http.get(&format!("{API_ROOT}/changes"))
             .bearer_auth(access_token)
             .query(&[
@@ -521,6 +556,7 @@ async fn incremental_scan(
                 ("fields", "nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,mimeType,size,quotaBytesUsed,parents,trashed))"),
             ]);
         let page: ChangePage = google_response(request.send().await).await?;
+        ensure_scan_active(&cache.account_id)?;
         for change in page.changes {
             if change.removed.unwrap_or(false) {
                 cache.items.remove(&change.file_id);
@@ -528,12 +564,16 @@ async fn incremental_scan(
                 if file.trashed.unwrap_or(false) {
                     cache.items.remove(&file.id);
                 } else {
-                    cache.items.insert(file.id.clone(), cached_item(file));
+                    let item = cached_item(file);
+                    if !item.is_folder {
+                        total = total.saturating_add(item.size);
+                    }
+                    cache.items.insert(item.id.clone(), item);
                 }
             }
             count += 1;
         }
-        emit_status(app_handle, &cache.account_id, count);
+        emit_status(app_handle, &cache.account_id, count, total);
         if let Some(next) = page.next_page_token {
             token = next;
             continue;
@@ -734,7 +774,7 @@ fn google_error_message(status: StatusCode, body: &str) -> String {
 
 async fn refresh_access_token(account_id: &str) -> Result<String, String> {
     let credential = read_credential(account_id)?;
-    let token = oauth_client(&required_client_id()?, None)?
+    let token = oauth_client(&required_client_id()?, &required_client_secret()?, None)?
         .exchange_refresh_token(&RefreshToken::new(credential.refresh_token))
         .request_async(async_http_client)
         .await
@@ -742,10 +782,14 @@ async fn refresh_access_token(account_id: &str) -> Result<String, String> {
     Ok(token.access_token().secret().to_string())
 }
 
-fn oauth_client(client_id: &str, redirect: Option<&str>) -> Result<BasicClient, String> {
+fn oauth_client(
+    client_id: &str,
+    client_secret: &str,
+    redirect: Option<&str>,
+) -> Result<BasicClient, String> {
     let client = BasicClient::new(
         ClientId::new(client_id.to_string()),
-        None,
+        Some(ClientSecret::new(client_secret.to_string())),
         AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).map_err(|err| err.to_string())?,
         Some(TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).map_err(|err| err.to_string())?),
     ).set_auth_type(AuthType::RequestBody);
@@ -757,10 +801,19 @@ fn oauth_client(client_id: &str, redirect: Option<&str>) -> Result<BasicClient, 
 
 fn client_id() -> String { env!("DUCKDISK_GOOGLE_CLIENT_ID").trim().to_string() }
 
+fn client_secret() -> String { env!("DUCKDISK_GOOGLE_CLIENT_SECRET").trim().to_string() }
+
 fn required_client_id() -> Result<String, String> {
     let value = client_id();
     if value.is_empty() {
         Err("Google Drive is not configured in this build. Set DUCKDISK_GOOGLE_CLIENT_ID and rebuild.".to_string())
+    } else { Ok(value) }
+}
+
+fn required_client_secret() -> Result<String, String> {
+    let value = client_secret();
+    if value.is_empty() {
+        Err("Google Drive is not configured in this build. Set DUCKDISK_GOOGLE_CLIENT_SECRET and rebuild.".to_string())
     } else { Ok(value) }
 }
 
@@ -863,17 +916,32 @@ fn write_scan_result(content: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn emit_status(app_handle: &tauri::AppHandle, account_id: &str, items: u64) {
+fn emit_status(app_handle: &tauri::AppHandle, account_id: &str, items: u64, total: u64) {
     app_handle.emit_all("googledrive_scan_status", ScanStatusPayload {
-        account_id: account_id.to_string(), items, total: 0,
+        account_id: account_id.to_string(), items, total,
         operation_not_permitted: 0, permission_denied: 0, interrupted: 0, other: 0,
     }).ok();
+}
+
+fn ensure_scan_active(account_id: &str) -> Result<(), String> {
+    if CANCELLED_SCANS
+        .lock()
+        .unwrap_or_else(|item| item.into_inner())
+        .contains(account_id)
+    {
+        Err(SCAN_CANCELLED_MESSAGE.to_string())
+    } else {
+        Ok(())
+    }
 }
 
 fn wait_for_oauth_callback(listener: TcpListener, expected_state: &str) -> Result<String, String> {
     listener.set_nonblocking(true).map_err(|err| err.to_string())?;
     let started = Instant::now();
     while started.elapsed() < CALLBACK_TIMEOUT {
+        if OAUTH_CANCELLED.load(Ordering::SeqCst) {
+            return Err("Google Drive connection cancelled.".to_string());
+        }
         match listener.accept() {
             Ok((mut stream, _)) => {
                 let mut buffer = [0_u8; 8192];
@@ -886,8 +954,12 @@ fn wait_for_oauth_callback(listener: TcpListener, expected_state: &str) -> Resul
                     return Err("Google sign-in state did not match".to_string());
                 }
                 if let Some(error) = params.get("error") {
-                    write_callback_response(&mut stream, "Google Drive connection cancelled")?;
-                    return Err(format!("Google sign-in failed: {error}"));
+                    let message = google_oauth_error_message(
+                        error,
+                        params.get("error_description").map(String::as_str),
+                    );
+                    write_callback_response(&mut stream, "Google Drive connection failed")?;
+                    return Err(message);
                 }
                 let code = params.get("code").cloned().ok_or_else(|| "Google callback did not include a code".to_string())?;
                 write_callback_response(&mut stream, "Google Drive connected")?;
@@ -897,7 +969,35 @@ fn wait_for_oauth_callback(listener: TcpListener, expected_state: &str) -> Resul
             Err(err) => return Err(err.to_string()),
         }
     }
-    Err("Google sign-in timed out".to_string())
+    Err("Google sign-in did not return to DuckDisk. If Google showed 'Sign in with Google temporarily disabled', DuckDisk has reached Google's 100-user limit. Otherwise, try again and finish the browser sign-in within two minutes.".to_string())
+}
+
+fn google_oauth_error_message(error: &str, description: Option<&str>) -> String {
+    let details = description.unwrap_or(error);
+    if is_user_cap_error(details) || is_user_cap_error(error) {
+        return USER_CAP_MESSAGE.to_string();
+    }
+    if error.eq_ignore_ascii_case("access_denied") {
+        return "Google Drive access was not granted.".to_string();
+    }
+    format!("Google sign-in failed: {details}")
+}
+
+fn google_token_error_message(details: &str) -> String {
+    if is_user_cap_error(details) {
+        USER_CAP_MESSAGE.to_string()
+    } else {
+        format!("Google sign-in failed while exchanging the authorization code: {details}")
+    }
+}
+
+fn is_user_cap_error(details: &str) -> bool {
+    let normalized = details.to_ascii_lowercase();
+    normalized.contains("rate_limit_exceeded")
+        || normalized.contains("temporarily disabled")
+        || normalized.contains("user cap")
+        || normalized.contains("100-user")
+        || normalized.contains("user limit")
 }
 
 fn write_callback_response(stream: &mut std::net::TcpStream, title: &str) -> Result<(), String> {
@@ -970,5 +1070,20 @@ mod tests {
         assert!(!cache.items.contains_key("folder"));
         assert!(!cache.items.contains_key("nested"));
         assert!(!cache.items.contains_key("file"));
+    }
+
+    #[test]
+    fn explains_google_oauth_user_cap() {
+        let message = google_oauth_error_message(
+            "rate_limit_exceeded",
+            Some("Sign in with Google temporarily disabled for this app"),
+        );
+        assert_eq!(message, USER_CAP_MESSAGE);
+    }
+
+    #[test]
+    fn distinguishes_cancelled_google_oauth() {
+        let message = google_oauth_error_message("access_denied", None);
+        assert_eq!(message, "Google Drive access was not granted.");
     }
 }

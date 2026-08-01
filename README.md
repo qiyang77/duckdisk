@@ -55,7 +55,7 @@ If macOS prompts for permissions during a scan, denied or previously blocked rea
 
 OneDrive scans use Microsoft account authorization and request `Files.ReadWrite` so selected files and folders can be moved to the OneDrive Recycle Bin. DuckDisk does not permanently delete cloud items. Refresh tokens are stored in macOS Keychain; cached scan metadata is stored in DuckDisk's application cache.
 
-Google Drive scans request the `drive.metadata` scope so DuckDisk can read metadata and move user-selected items to Google Drive Trash. File contents are not downloaded. Tokens are stored in macOS Keychain, and the app can revoke Google authorization and remove its local account cache. SSH scans are read-only and use the system `ssh` command; configure key-based login before adding a connection in DuckDisk.
+Google Drive scans request the `drive.metadata` scope so DuckDisk can read metadata and move user-selected items to Google Drive Trash. File contents are not downloaded. Tokens are stored in macOS Keychain, and the app can revoke Google authorization and remove its local account cache. SSH scans use the system `ssh` command with either existing SSH keys/configuration or a password stored in macOS Keychain. DuckDisk can permanently delete user-selected SSH files within the configured remote path only after an additional confirmation.
 
 See the [Privacy Policy](https://duckdisk.com/privacy.html) and [Terms of Use](https://duckdisk.com/terms.html).
 
@@ -96,14 +96,19 @@ For GitHub releases, set the repository Actions variable `ONEDRIVE_CLIENT_ID`.
 
 ### Google Drive development setup
 
-Create a Google OAuth client with application type **Desktop app**, enable the Google Drive API, and add your Google account as a test user while the consent screen remains in testing. No client secret is embedded.
+Create a Google OAuth client with application type **Desktop app**, enable the Google Drive API, and add your Google account as a test user while the consent screen remains in testing. Supply the desktop client ID and client secret only at build time; do not commit them to the repository.
 
 ```bash
-DUCKDISK_GOOGLE_CLIENT_ID=your-client-id npm run tauri dev
-DUCKDISK_GOOGLE_CLIENT_ID=your-client-id npm run tauri build
+DUCKDISK_GOOGLE_CLIENT_ID=your-client-id \
+DUCKDISK_GOOGLE_CLIENT_SECRET=your-client-secret \
+npm run tauri dev
+
+DUCKDISK_GOOGLE_CLIENT_ID=your-client-id \
+DUCKDISK_GOOGLE_CLIENT_SECRET=your-client-secret \
+npm run tauri build
 ```
 
-For GitHub releases, set the repository Actions variable `GOOGLE_DRIVE_CLIENT_ID`.
+For GitHub releases, set the repository Actions variable `GOOGLE_DRIVE_CLIENT_ID` and Actions secret `GOOGLE_DRIVE_CLIENT_SECRET`.
 
 The macOS installer is generated under:
 

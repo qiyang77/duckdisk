@@ -429,6 +429,17 @@ a:focus-visible,
   color: #fff;
 }
 
+.button-cancel {
+  border-color: #704147;
+  color: #ef9a9f;
+}
+
+.button-cancel:hover:not(:disabled) {
+  border-color: #a7555d;
+  background: #382329;
+  color: #ffc3c6;
+}
+
 .button-warning {
   border-color: #9b7836;
   background: #312918;
@@ -647,6 +658,58 @@ a:focus-visible,
   gap: 12px;
 }
 
+.ssh-auth-method {
+  display: grid;
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.55fr);
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid #363e45;
+  border-radius: 7px;
+  background: #111519;
+}
+
+.ssh-auth-method button {
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #89949d;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ssh-auth-method button:hover {
+  color: #dce1e5;
+}
+
+.ssh-auth-method button.active {
+  background: #28323a;
+  color: #f3f6f7;
+  box-shadow: inset 0 0 0 1px #45515b;
+}
+
+.ssh-password-field {
+  position: relative;
+}
+
+.ssh-password-field input {
+  padding-right: 42px;
+}
+
+.ssh-password-field .icon-button {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  min-height: 28px;
+  transform: translateY(-50%);
+}
+
 .ssh-form-note {
   border: 1px solid #363c42;
   border-radius: 6px;
@@ -725,6 +788,12 @@ a:focus-visible,
   height: 100%;
   border-radius: inherit;
   background: #48b7dd;
+}
+
+.scan-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 18px;
 }
 
 .results-workspace {

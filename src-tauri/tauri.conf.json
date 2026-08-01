@@ -73,10 +73,12 @@
     "windows": [
       {
         "fullscreen": false,
-        "height": 600,
+        "height": 760,
+        "minHeight": 620,
+        "minWidth": 900,
         "resizable": true,
         "title": "DuckDisk",
-        "width": 1100,
+        "width": 1200,
         "decorations": false,
         "transparent": true,
         "center": true

@@ -24,6 +24,14 @@ struct DuckDisk<'a> {
 }
 
 fn main() {
+    match ssh::run_askpass_helper() {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    }
     tauri::Builder::default()
         .manage(MyState(Default::default()))
         .setup(|app| {
@@ -52,23 +60,31 @@ fn main() {
             refresh_scan_path,
             get_onedrive_state,
             connect_onedrive_account,
+            cancel_onedrive_connection,
             disconnect_onedrive_account,
             start_onedrive_scan,
+            stop_onedrive_scan,
             read_onedrive_scan_result,
             refresh_onedrive_item,
             delete_onedrive_items,
             get_google_drive_state,
             connect_google_drive_account,
+            cancel_google_drive_connection,
             disconnect_google_drive_account,
             revoke_google_drive_account,
             start_google_drive_scan,
+            stop_google_drive_scan,
             read_google_drive_scan_result,
             delete_google_drive_items,
             get_ssh_connections,
+            get_ssh_storage_usage,
             save_ssh_connection,
             remove_ssh_connection,
             start_ssh_scan,
+            stop_ssh_scan,
+            clear_ssh_cached_scan_result,
             read_ssh_scan_result,
+            delete_ssh_items,
             check_for_updates,
             open_full_disk_access_settings,
             show_in_folder
@@ -199,6 +215,11 @@ async fn connect_onedrive_account(
 }
 
 #[tauri::command]
+fn cancel_onedrive_connection() {
+    onedrive::cancel_connection();
+}
+
+#[tauri::command]
 fn disconnect_onedrive_account(
     app_handle: tauri::AppHandle,
     account_id: String,
@@ -213,6 +234,11 @@ fn start_onedrive_scan(
     force_full: bool,
 ) -> Result<(), String> {
     onedrive::start_scan(app_handle, account_id, force_full)
+}
+
+#[tauri::command]
+fn stop_onedrive_scan(account_id: String) {
+    onedrive::stop_scan(&account_id);
 }
 
 #[tauri::command]
@@ -253,6 +279,11 @@ async fn connect_google_drive_account(
 }
 
 #[tauri::command]
+fn cancel_google_drive_connection() {
+    google_drive::cancel_connection();
+}
+
+#[tauri::command]
 fn disconnect_google_drive_account(
     app_handle: tauri::AppHandle,
     account_id: String,
@@ -278,6 +309,11 @@ fn start_google_drive_scan(
 }
 
 #[tauri::command]
+fn stop_google_drive_scan(account_id: String) {
+    google_drive::stop_scan(&account_id);
+}
+
+#[tauri::command]
 fn read_google_drive_scan_result(path: String) -> Result<String, String> {
     google_drive::read_scan_result(&path)
 }
@@ -294,6 +330,18 @@ async fn delete_google_drive_items(
 #[tauri::command]
 fn get_ssh_connections(app_handle: tauri::AppHandle) -> Result<Vec<ssh::SshConnection>, String> {
     ssh::get_connections(&app_handle)
+}
+
+#[tauri::command]
+async fn get_ssh_storage_usage(
+    app_handle: tauri::AppHandle,
+    connection_id: String,
+) -> Result<ssh::SshStorageUsage, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        ssh::get_storage_usage(&app_handle, &connection_id)
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
@@ -316,8 +364,31 @@ fn remove_ssh_connection(
 fn start_ssh_scan(
     app_handle: tauri::AppHandle,
     connection_id: String,
+    force_full: bool,
 ) -> Result<(), String> {
-    ssh::start_scan(app_handle, connection_id)
+    ssh::start_scan(app_handle, connection_id, force_full)
+}
+
+#[tauri::command]
+fn stop_ssh_scan(connection_id: String) {
+    ssh::stop_scan(&connection_id);
+}
+
+#[tauri::command]
+fn clear_ssh_cached_scan_result(
+    app_handle: tauri::AppHandle,
+    connection_id: String,
+) -> Result<(), String> {
+    ssh::clear_cached_result(&app_handle, &connection_id)
+}
+
+#[tauri::command]
+fn delete_ssh_items(
+    app_handle: tauri::AppHandle,
+    connection_id: String,
+    item_ids: Vec<String>,
+) -> Result<ssh::SshDeleteResult, String> {
+    ssh::delete_items(&app_handle, &connection_id, item_ids)
 }
 
 #[tauri::command]

@@ -18,6 +18,7 @@ import {
 } from "../virtualRows";
 import {
   AlertTriangle,
+  ArrowLeft,
   ArrowUp,
   ChevronDown,
   ChevronRight,
@@ -28,6 +29,7 @@ import {
   RefreshCw,
   RotateCcw,
   ShieldCheck,
+  Square,
   Trash2,
   X,
 } from "lucide-react";
@@ -532,7 +534,8 @@ const Scanning = () => {
   const isSsh = source === "ssh";
   const isCloud = source !== "local";
   const requiresKeychainApproval = isOneDrive || isGoogleDrive;
-  const canDelete = !isSsh;
+  const canDelete = true;
+  const usesTrash = isOneDrive || isGoogleDrive;
   const canRefreshItem = !isCloud || isOneDrive;
   const providerName = isOneDrive
     ? "OneDrive"
@@ -574,12 +577,15 @@ const Scanning = () => {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [loadedFromCache, setLoadedFromCache] = useState(false);
   const [scanNonce, setScanNonce] = useState(0);
+  const [isStoppingScan, setStoppingScan] = useState(false);
   const [oneDriveKeychainApproved, setOneDriveKeychainApproved] = useState(
     () =>
       !requiresKeychainApproval ||
       sessionStorage.getItem(credentialNoticeKey(source)) === "true"
   );
   const [deleteList, setDeleteList] = useState<DiskItem[]>([]);
+  const [showPermanentDeleteConfirmation, setShowPermanentDeleteConfirmation] =
+    useState(false);
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -804,7 +810,7 @@ const Scanning = () => {
         scanningStarted = true;
         const command = `start_${cloudCommandPrefix}_scan`;
         const args = isSsh
-          ? { connectionId: accountId }
+          ? { connectionId: accountId, forceFull: scanNonce > 0 }
           : { accountId, forceFull: scanNonce > 0 };
         invoke(command, args).catch((error) => {
           setScanError(String(error));
@@ -863,8 +869,16 @@ const Scanning = () => {
       unlistenCompleted.then((dispose) => dispose());
       unlistenDeleteStatus.then((dispose) => dispose());
       worker.current?.terminate();
-      if (scanningStarted && !isCloud) {
-        invoke("stop_scanning", { path: disk });
+      if (scanningStarted) {
+        if (isCloud) {
+          const command = `stop_${cloudCommandPrefix}_scan`;
+          const args = isSsh
+            ? { connectionId: accountId }
+            : { accountId };
+          invoke(command, args).catch(console.error);
+        } else {
+          invoke("stop_scanning", { path: disk }).catch(console.error);
+        }
       }
     };
   }, [
@@ -1072,8 +1086,30 @@ const Scanning = () => {
         console.error
       );
     }
+    if (isSsh && loadedFromCache) {
+      await invoke("clear_ssh_cached_scan_result", {
+        connectionId: accountId,
+      }).catch(console.error);
+    }
     setLoadedFromCache(false);
     setScanNonce((current) => current + 1);
+  };
+
+  const stopScanAndReturn = async () => {
+    setStoppingScan(true);
+    try {
+      if (isCloud) {
+        await invoke(`stop_${cloudCommandPrefix}_scan`,
+          isSsh ? { connectionId: accountId } : { accountId }
+        );
+      } else {
+        await invoke("stop_scanning", { path: disk });
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      navigate("/");
+    }
   };
 
   const addDeleteTarget = (node: DiskItem | null) => {
@@ -1081,6 +1117,7 @@ const Scanning = () => {
       !canDelete ||
       !node ||
       node.id === "/" ||
+      node.id === rootNode?.id ||
       isDeletedPath(node.id, deletedIds)
     ) {
       return;
@@ -1167,7 +1204,13 @@ const Scanning = () => {
     node: DiskItem,
     deleted: boolean
   ) => {
-    if (!canDelete || event.button !== 0 || node.id === "/" || deleted) {
+    if (
+      !canDelete ||
+      event.button !== 0 ||
+      node.id === "/" ||
+      node.id === rootNode?.id ||
+      deleted
+    ) {
       return;
     }
 
@@ -1197,16 +1240,27 @@ const Scanning = () => {
     const failedItems: DiskItem[] = [];
     let cloudFailureMessage: string | null = null;
 
-    if (isOneDrive || isGoogleDrive) {
+    if (isOneDrive || isGoogleDrive || isSsh) {
       try {
         const result = await invoke<CloudDeleteResult>(
-          isGoogleDrive ? "delete_google_drive_items" : "delete_onedrive_items",
-          {
-            accountId,
-            itemIds: deleteList
-              .map((node) => node.cloudId)
-              .filter((itemId): itemId is string => Boolean(itemId)),
-          }
+          isSsh
+            ? "delete_ssh_items"
+            : isGoogleDrive
+            ? "delete_google_drive_items"
+            : "delete_onedrive_items",
+          isSsh
+            ? {
+                connectionId: accountId,
+                itemIds: deleteList
+                  .map((node) => node.cloudId)
+                  .filter((itemId): itemId is string => Boolean(itemId)),
+              }
+            : {
+                accountId,
+                itemIds: deleteList
+                  .map((node) => node.cloudId)
+                  .filter((itemId): itemId is string => Boolean(itemId)),
+              }
         );
         cloudFailureMessage = result.failures[0]?.message || null;
         const deletedCloudIds = new Set(result.deletedIds);
@@ -1268,7 +1322,7 @@ const Scanning = () => {
       current: deleteList.length,
       failed: failedItems.length,
       error: failedItems.length
-        ? `${isCloud ? "Move failed" : "Delete failed"} for ${
+        ? `${usesTrash ? "Move failed" : "Delete failed"} for ${
             failedItems.length
           } item${
             failedItems.length === 1 ? "" : "s"
@@ -1348,11 +1402,11 @@ const Scanning = () => {
             <div className="scan-message">
               {status
                 ? isCloud
-                  ? isSsh
-                    ? "Scanning remote path over SSH"
-                    : `${status.items.toLocaleString()} cloud items received${
-                        status.total ? ` - ${formatBytes(status.total)}` : ""
-                      }`
+                  ? `${status.items.toLocaleString()} ${
+                      isSsh ? "remote" : "cloud"
+                    } items scanned${
+                      status.total ? ` - ${formatBytes(status.total)}` : ""
+                    }`
                   : `${status.items.toLocaleString()} ${
                       scanPhase === "incremental" ? "files checked" : "files"
                     } - ${formatBytes(status.total)}${
@@ -1375,6 +1429,34 @@ const Scanning = () => {
               }}
             />
           </div>
+          {scanPhase === "failed" ? (
+            <div className="scan-actions">
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => navigate("/")}
+              >
+                <ArrowLeft size={14} />
+                Back to All Disks
+              </button>
+            </div>
+          ) : (
+            <div className="scan-actions">
+              <button
+                type="button"
+                className="button button-secondary button-cancel"
+                onClick={stopScanAndReturn}
+                disabled={isStoppingScan}
+              >
+                {isStoppingScan ? (
+                  <RefreshCw size={14} className="animate-spin" />
+                ) : (
+                  <Square size={12} fill="currentColor" />
+                )}
+                {isStoppingScan ? "Stopping..." : "Stop & Back"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1420,7 +1502,7 @@ const Scanning = () => {
             )}
             {loadedFromCache && (
               <span className="status-chip status-chip-success">
-                {isCloud ? "Delta updated" : "Cached"}
+                {isSsh ? "Cached" : isCloud ? "Delta updated" : "Cached"}
               </span>
             )}
           </div>
@@ -1476,7 +1558,7 @@ const Scanning = () => {
             className="button button-secondary"
           >
             <RotateCcw size={14} />
-            {(isOneDrive || isGoogleDrive || loadedFromCache) && !isSsh
+            {isOneDrive || isGoogleDrive || loadedFromCache
               ? "Clean Cache & Rescan"
               : "Rescan"}
           </button>
@@ -1837,9 +1919,11 @@ const Scanning = () => {
             }`}
           >
             {deleteList.length === 0 ? (
-              isCloud
+              usesTrash
                 ? `Drag files or folders here to move them to ${cloudTrashName}`
-                : "Drag files or folders here to delete"
+                : isSsh
+                ? "Drag remote files or folders here to permanently delete"
+                : "Drag files or folders here to permanently delete"
             ) : (
               <div className="truncate text-left text-slate-200">
                 {deleteList.length} selected:{" "}
@@ -1856,7 +1940,7 @@ const Scanning = () => {
                   }
                 >
                   {deleteState.error ||
-                    (isCloud ? `Moving to ${cloudTrashName}` : "Deleting")}
+                    (usesTrash ? `Moving to ${cloudTrashName}` : "Deleting")}
                 </span>
                 <span>
                   {deleteState.current}/{deleteState.total}
@@ -1899,18 +1983,24 @@ const Scanning = () => {
               Clear
             </button>
             <button
-              onClick={deleteSelected}
+              onClick={() => {
+                if (usesTrash) {
+                  deleteSelected();
+                } else {
+                  setShowPermanentDeleteConfirmation(true);
+                }
+              }}
               disabled={!deleteList.length || deleteState.isDeleting}
               className="button button-danger flex-1"
             >
               {!deleteState.isDeleting && <Trash2 size={14} />}
               {deleteState.isDeleting
-                ? `${isCloud ? "Moving" : "Deleting"} ${
+                ? `${usesTrash ? "Moving" : "Deleting"} ${
                     deleteState.current
                   }/${deleteState.total}`
-                : isCloud
+                : usesTrash
                 ? "Move to Trash"
-                : "Delete"}
+                : "Delete Permanently"}
             </button>
           </div>
         </div>
@@ -1987,10 +2077,70 @@ const Scanning = () => {
                 }}
                 className="context-menu-item context-menu-item-danger"
               >
-                {isCloud ? "Add to Trash List" : "Add to Delete List"}
+                {usesTrash ? "Add to Trash List" : "Add to Delete List"}
               </button>
             </>
           )}
+        </div>
+      )}
+      {showPermanentDeleteConfirmation && (
+        <div className="modal-backdrop">
+          <div
+            className="app-dialog w-full max-w-lg"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="permanent-delete-title"
+          >
+            <div className="dialog-header">
+              <div>
+                <div
+                  id="permanent-delete-title"
+                  className="flex items-center gap-2 text-sm font-semibold text-white"
+                >
+                  <AlertTriangle size={16} className="text-red-300" />
+                  Permanently delete {deleteList.length} item
+                  {deleteList.length === 1 ? "" : "s"}?
+                </div>
+                <div className="mt-1 text-xs text-slate-400">
+                  {isSsh
+                    ? "These items will be removed directly from the remote server."
+                    : "These items will be removed directly from this Mac."}
+                </div>
+              </div>
+            </div>
+            <div className="p-4">
+              <div className="max-h-28 overflow-auto rounded border border-[#343b41] bg-[#111519] px-3 py-2 text-xs text-slate-300">
+                {deleteList.map((item) => (
+                  <div key={item.id} className="truncate py-0.5">
+                    {item.id}
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-xs font-medium text-red-300">
+                This action cannot be undone.
+              </p>
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => setShowPermanentDeleteConfirmation(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="button button-danger"
+                  onClick={() => {
+                    setShowPermanentDeleteConfirmation(false);
+                    deleteSelected();
+                  }}
+                >
+                  <Trash2 size={14} />
+                  Delete Permanently
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
       {showScanIssues && (

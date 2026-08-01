@@ -17,7 +17,10 @@ use once_cell::sync::Lazy;
 use reqwest::{Client, StatusCode};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
 use tauri::Manager;
 use url::Url;
 
@@ -27,6 +30,7 @@ const CACHE_VERSION: &str = "duckdisk-onedrive-cache-v1";
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 const ACCESS_TOKEN_REFRESH_INTERVAL: Duration = Duration::from_secs(45 * 60);
 const CHECKPOINT_ITEM_INTERVAL: u64 = 20_000;
+const SCAN_CANCELLED_MESSAGE: &str = "OneDrive scan cancelled.";
 
 #[derive(Clone, Copy)]
 enum ActiveScanPhase {
@@ -40,10 +44,12 @@ struct ActiveScan {
     items: u64,
     total: u64,
     phase: Option<ActiveScanPhase>,
+    cancelled: bool,
 }
 
 static ACTIVE_SCANS: Lazy<Mutex<HashMap<String, ActiveScan>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+static OAUTH_CANCELLED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -210,6 +216,7 @@ pub fn get_state(app_handle: &tauri::AppHandle) -> Result<OneDriveState, String>
 }
 
 pub async fn connect_account(app_handle: &tauri::AppHandle) -> Result<OneDriveAccount, String> {
+    OAUTH_CANCELLED.store(false, Ordering::SeqCst);
     let client_id = required_client_id()?;
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|err| err.to_string())?;
     let port = listener.local_addr().map_err(|err| err.to_string())?.port();
@@ -259,6 +266,10 @@ pub async fn connect_account(app_handle: &tauri::AppHandle) -> Result<OneDriveAc
     store_credential(&account.id, &refresh_token, true)?;
     upsert_account(app_handle, account.clone())?;
     Ok(account)
+}
+
+pub fn cancel_connection() {
+    OAUTH_CANCELLED.store(true, Ordering::SeqCst);
 }
 
 pub fn disconnect_account(app_handle: &tauri::AppHandle, account_id: &str) -> Result<(), String> {
@@ -322,6 +333,7 @@ pub fn start_scan(
                     )
                     .ok();
             }
+            Err(err) if err == SCAN_CANCELLED_MESSAGE => {}
             Err(err) => {
                 app_handle
                     .emit_all(
@@ -340,6 +352,16 @@ pub fn start_scan(
             .remove(&account_id);
     });
     Ok(())
+}
+
+pub fn stop_scan(account_id: &str) {
+    if let Some(scan) = ACTIVE_SCANS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get_mut(account_id)
+    {
+        scan.cancelled = true;
+    }
 }
 
 pub fn read_scan_result(path: &str) -> Result<String, String> {
@@ -553,6 +575,7 @@ async fn scan_account(
     account_id: &str,
     force_full: bool,
 ) -> Result<PathBuf, String> {
+    ensure_scan_active(account_id)?;
     let mut access_token = refresh_access_token(account_id).await?;
     let mut access_token_refreshed_at = Instant::now();
     let http = Client::new();
@@ -606,6 +629,7 @@ async fn scan_account(
     }
 
     loop {
+        ensure_scan_active(account_id)?;
         if access_token_refreshed_at.elapsed() >= ACCESS_TOKEN_REFRESH_INTERVAL {
             access_token = refresh_access_token(account_id).await?;
             access_token_refreshed_at = Instant::now();
@@ -651,6 +675,7 @@ async fn scan_account(
                 }
                 Err(err) => return Err(err),
             };
+        ensure_scan_active(account_id)?;
         for item in page.value {
             changed_items += 1;
             if item.folder.is_none() && item.deleted.is_none() {
@@ -679,6 +704,8 @@ async fn scan_account(
         cache.checkpoint_bytes = 0;
         break;
     }
+
+    ensure_scan_active(account_id)?;
 
     write_cache(&path, &cache)?;
     emit_scan_phase(app_handle, account_id, ActiveScanPhase::Finalizing);
@@ -1002,6 +1029,9 @@ fn wait_for_oauth_callback(listener: TcpListener, expected_state: &str) -> Resul
         .map_err(|err| err.to_string())?;
     let deadline = Instant::now() + CALLBACK_TIMEOUT;
     while Instant::now() < deadline {
+        if OAUTH_CANCELLED.load(Ordering::SeqCst) {
+            return Err("OneDrive connection cancelled.".to_string());
+        }
         match listener.accept() {
             Ok((mut stream, _)) => {
                 stream
@@ -1300,6 +1330,20 @@ fn replay_active_scan(app_handle: &tauri::AppHandle, account_id: &str, scan: &Ac
             .ok();
     }
     emit_scan_status(app_handle, account_id, scan.items, scan.total);
+}
+
+fn ensure_scan_active(account_id: &str) -> Result<(), String> {
+    let cancelled = ACTIVE_SCANS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(account_id)
+        .map(|scan| scan.cancelled)
+        .unwrap_or(true);
+    if cancelled {
+        Err(SCAN_CANCELLED_MESSAGE.to_string())
+    } else {
+        Ok(())
+    }
 }
 
 fn scan_phase_event(phase: ActiveScanPhase) -> &'static str {

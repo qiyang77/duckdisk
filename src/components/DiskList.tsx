@@ -15,10 +15,15 @@ import { forgetDiskRoute } from "../diskRoute";
 import {
   ChevronRight,
   Cloud,
+  Eye,
+  EyeOff,
   ExternalLink,
+  KeyRound,
+  LockKeyhole,
   Plus,
   RefreshCw,
   Server,
+  Settings2,
   ShieldCheck,
   Unplug,
   X,
@@ -58,6 +63,27 @@ type SshConnection = {
   host: string;
   port: number;
   path: string;
+  authMethod: "key" | "password";
+};
+
+type SshStorageUsage = {
+  totalSpace: number;
+  usedSpace: number;
+  availableSpace: number;
+};
+
+type SshDraft = Omit<SshConnection, "id"> & {
+  id?: string;
+  password: string;
+};
+
+const emptySshDraft: SshDraft = {
+  name: "",
+  host: "",
+  port: 22,
+  path: "/",
+  authMethod: "key" as "key" | "password",
+  password: "",
 };
 
 type UpdateCheck = {
@@ -88,17 +114,21 @@ const DiskList = () => {
     accounts: [],
   });
   const [sshConnections, setSshConnections] = useState<SshConnection[]>([]);
+  const [sshStorageUsage, setSshStorageUsage] = useState<
+    Record<string, SshStorageUsage | null>
+  >({});
   const [showSshDialog, setShowSshDialog] = useState(false);
+  const [editingSshConnection, setEditingSshConnection] =
+    useState<SshConnection | null>(null);
   const [showCloudPrivacy, setShowCloudPrivacy] = useState(false);
   const [googleAccountToRevoke, setGoogleAccountToRevoke] =
     useState<GoogleDriveAccount | null>(null);
-  const [sshDraft, setSshDraft] = useState({
-    name: "",
-    host: "",
-    port: 22,
-    path: "/",
-  });
+  const [sshDraft, setSshDraft] = useState(emptySshDraft);
+  const [showSshPassword, setShowSshPassword] = useState(false);
   const [cloudBusy, setCloudBusy] = useState<string | null>(null);
+  const [oauthCancelRequested, setOauthCancelRequested] = useState<
+    "onedrive" | "google" | null
+  >(null);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [isCheckingUpdates, setCheckingUpdates] = useState(false);
   const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
@@ -138,7 +168,26 @@ const DiskList = () => {
   };
 
   const syncSshConnections = async () => {
-    setSshConnections(await invoke<SshConnection[]>("get_ssh_connections"));
+    const connections = await invoke<SshConnection[]>("get_ssh_connections");
+    setSshConnections(connections);
+    void Promise.all(
+      connections.map(async (connection) => {
+        try {
+          const usage = await invoke<SshStorageUsage>("get_ssh_storage_usage", {
+            connectionId: connection.id,
+          });
+          setSshStorageUsage((current) => ({
+            ...current,
+            [connection.id]: usage,
+          }));
+        } catch {
+          setSshStorageUsage((current) => ({
+            ...current,
+            [connection.id]: null,
+          }));
+        }
+      })
+    );
   };
 
   useEffect(() => {
@@ -149,13 +198,18 @@ const DiskList = () => {
 
   const connectOneDrive = async () => {
     setCloudBusy("connect");
+    setOauthCancelRequested(null);
     setCloudError(null);
     try {
       await invoke("connect_onedrive_account");
       await syncOneDrive();
     } catch (error) {
-      setCloudError(String(error));
+      const message = String(error);
+      if (!message.toLowerCase().includes("connection cancelled")) {
+        setCloudError(message);
+      }
     } finally {
+      setOauthCancelRequested(null);
       setCloudBusy(null);
     }
   };
@@ -175,14 +229,34 @@ const DiskList = () => {
 
   const connectGoogleDrive = async () => {
     setCloudBusy("google-connect");
+    setOauthCancelRequested(null);
     setCloudError(null);
     try {
       await invoke("connect_google_drive_account");
       await syncGoogleDrive();
     } catch (error) {
-      setCloudError(String(error));
+      const message = String(error);
+      if (!message.toLowerCase().includes("connection cancelled")) {
+        setCloudError(message);
+      }
     } finally {
+      setOauthCancelRequested(null);
       setCloudBusy(null);
+    }
+  };
+
+  const cancelOAuthConnection = async (provider: "onedrive" | "google") => {
+    setOauthCancelRequested(provider);
+    setCloudError(null);
+    try {
+      await invoke(
+        provider === "onedrive"
+          ? "cancel_onedrive_connection"
+          : "cancel_google_drive_connection"
+      );
+    } catch (error) {
+      setOauthCancelRequested(null);
+      setCloudError(String(error));
     }
   };
 
@@ -208,12 +282,37 @@ const DiskList = () => {
       await invoke("save_ssh_connection", { connection: sshDraft });
       await syncSshConnections();
       setShowSshDialog(false);
-      setSshDraft({ name: "", host: "", port: 22, path: "/" });
+      setEditingSshConnection(null);
+      setSshDraft(emptySshDraft);
+      setShowSshPassword(false);
     } catch (error) {
       setCloudError(String(error));
     } finally {
       setCloudBusy(null);
     }
+  };
+
+  const openNewSshConnection = () => {
+    setEditingSshConnection(null);
+    setSshDraft(emptySshDraft);
+    setShowSshPassword(false);
+    setCloudError(null);
+    setShowSshDialog(true);
+  };
+
+  const openSshConnectionSettings = (connection: SshConnection) => {
+    setEditingSshConnection(connection);
+    setSshDraft({ ...connection, password: "" });
+    setShowSshPassword(false);
+    setCloudError(null);
+    setShowSshDialog(true);
+  };
+
+  const closeSshDialog = () => {
+    setShowSshDialog(false);
+    setEditingSshConnection(null);
+    setSshDraft(emptySshDraft);
+    setShowSshPassword(false);
   };
 
   const removeSshConnection = async (connection: SshConnection) => {
@@ -307,24 +406,56 @@ const DiskList = () => {
                 <ShieldCheck size={14} />
                 Privacy & Access
               </button>
-              <button
-                type="button"
-                onClick={connectOneDrive}
-                disabled={!oneDrive.configured || cloudBusy !== null}
-                className="button button-primary"
-              >
-                {cloudBusy === "connect" ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
-                OneDrive
-              </button>
-              <button
-                type="button"
-                onClick={connectGoogleDrive}
-                disabled={!googleDrive.configured || cloudBusy !== null}
-                className="button button-secondary"
-              >
-                {cloudBusy === "google-connect" ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />}
-                Google Drive
-              </button>
+              {cloudBusy === "connect" ? (
+                <button
+                  type="button"
+                  onClick={() => cancelOAuthConnection("onedrive")}
+                  disabled={oauthCancelRequested === "onedrive"}
+                  className="button button-secondary button-cancel"
+                >
+                  {oauthCancelRequested === "onedrive" ? (
+                    <RefreshCw size={14} className="animate-spin" />
+                  ) : (
+                    <X size={14} />
+                  )}
+                  {oauthCancelRequested === "onedrive" ? "Cancelling..." : "Cancel OneDrive"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={connectOneDrive}
+                  disabled={!oneDrive.configured || cloudBusy !== null}
+                  className="button button-secondary"
+                >
+                  <Plus size={14} />
+                  OneDrive
+                </button>
+              )}
+              {cloudBusy === "google-connect" ? (
+                <button
+                  type="button"
+                  onClick={() => cancelOAuthConnection("google")}
+                  disabled={oauthCancelRequested === "google"}
+                  className="button button-secondary button-cancel"
+                >
+                  {oauthCancelRequested === "google" ? (
+                    <RefreshCw size={14} className="animate-spin" />
+                  ) : (
+                    <X size={14} />
+                  )}
+                  {oauthCancelRequested === "google" ? "Cancelling..." : "Cancel Google Drive"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={connectGoogleDrive}
+                  disabled={!googleDrive.configured || cloudBusy !== null}
+                  className="button button-secondary"
+                >
+                  <Plus size={14} />
+                  Google Drive
+                </button>
+              )}
             </div>
           </div>
           {!oneDrive.configured && (
@@ -476,7 +607,7 @@ const DiskList = () => {
                           Google Drive - {account.name}
                         </div>
                         <div className="mt-1 truncate text-[12px] tabular-nums text-[#a6afb8]">
-                          {formatBytes(account.usedSpace)} of {formatBytes(account.totalSpace)} used · {account.email}
+                          {formatBytes(account.usedSpace)} of {formatBytes(account.totalSpace)} used
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-3">
@@ -513,9 +644,9 @@ const DiskList = () => {
           <div className="section-toolbar">
             <div>
               <h2 id="remote-storage-title">Remote Servers</h2>
-              <p>Scan a remote path through your existing SSH keys and config</p>
+              <p>Scan a remote path with a saved password or your SSH key configuration</p>
             </div>
-            <button type="button" className="button button-secondary" onClick={() => setShowSshDialog(true)}>
+            <button type="button" className="button button-secondary" onClick={openNewSshConnection}>
               <Plus size={14} />
               Add SSH Connection
             </button>
@@ -524,50 +655,88 @@ const DiskList = () => {
             {sshConnections.length === 0 && (
               <div className="empty-storage-row"><Server size={20} /><span>No SSH connections saved</span></div>
             )}
-            {sshConnections.map((connection) => (
-              <div
-                key={connection.id}
-                role="button"
-                tabIndex={0}
-                className="storage-row group"
-                onClick={() => navigate("/disk", { state: {
-                  source: "ssh",
-                  accountId: connection.id,
-                  disk: connection.name,
-                  used: 0,
-                }})}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    navigate("/disk", { state: {
-                      source: "ssh",
-                      accountId: connection.id,
-                      disk: connection.name,
-                      used: 0,
-                    }});
+            {sshConnections.map((connection) => {
+              const usage = sshStorageUsage[connection.id];
+              return (
+                <div
+                  key={connection.id}
+                  role="button"
+                  tabIndex={0}
+                  className="storage-row group"
+                  onClick={() =>
+                    navigate("/disk", {
+                      state: {
+                        source: "ssh",
+                        accountId: connection.id,
+                        disk: connection.name,
+                        used: usage?.usedSpace ?? 0,
+                      },
+                    })
                   }
-                }}
-              >
-                <div className="storage-icon storage-icon-ssh"><Server size={30} /></div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[14px] font-semibold text-[#f4f6f7]">{connection.name}</div>
-                  <div className="mt-1 truncate text-[12px] text-[#a6afb8]">{connection.host}:{connection.port} · {connection.path}</div>
-                </div>
-                <button
-                  type="button"
-                  className="icon-button icon-button-danger"
-                  title={`Remove ${connection.name}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    removeSshConnection(connection);
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      navigate("/disk", {
+                        state: {
+                          source: "ssh",
+                          accountId: connection.id,
+                          disk: connection.name,
+                          used: usage?.usedSpace ?? 0,
+                        },
+                      });
+                    }
                   }}
-                  disabled={cloudBusy !== null}
                 >
-                  {cloudBusy === `ssh-${connection.id}` ? <RefreshCw size={14} className="animate-spin" /> : <Unplug size={14} />}
-                </button>
-                <ChevronRight className="storage-chevron" size={17} />
-              </div>
-            ))}
+                  <div className="storage-icon storage-icon-ssh">
+                    <Server size={30} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[14px] font-semibold text-[#f4f6f7]">
+                      {connection.name}
+                    </div>
+                    <div className="mt-1 truncate text-[12px] tabular-nums text-[#a6afb8]">
+                      {usage === undefined
+                        ? "Checking storage usage..."
+                        : usage === null
+                        ? "Storage usage unavailable"
+                        : `${formatBytes(usage.usedSpace)} of ${formatBytes(
+                            usage.totalSpace
+                          )} used`}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    title={`Edit ${connection.name}`}
+                    aria-label={`Edit ${connection.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openSshConnectionSettings(connection);
+                    }}
+                    disabled={cloudBusy !== null}
+                  >
+                    <Settings2 size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button icon-button-danger"
+                    title={`Remove ${connection.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      removeSshConnection(connection);
+                    }}
+                    disabled={cloudBusy !== null}
+                  >
+                    {cloudBusy === `ssh-${connection.id}` ? (
+                      <RefreshCw size={14} className="animate-spin" />
+                    ) : (
+                      <Unplug size={14} />
+                    )}
+                  </button>
+                  <ChevronRight className="storage-chevron" size={17} />
+                </div>
+              );
+            })}
           </div>
         </section>
       </div>
@@ -576,10 +745,16 @@ const DiskList = () => {
           <div className="app-dialog ssh-dialog">
             <div className="dialog-header">
               <div>
-                <div className="text-sm font-semibold text-white">Add SSH Connection</div>
-                <div className="mt-1 text-xs text-slate-400">Uses macOS ssh, ~/.ssh/config, and your existing keys</div>
+                <div className="text-sm font-semibold text-white">
+                  {editingSshConnection ? "SSH Connection Settings" : "Add SSH Connection"}
+                </div>
+                <div className="mt-1 text-xs text-slate-400">
+                  {editingSshConnection
+                    ? "Update this server's address, path, or authentication"
+                    : "Choose how DuckDisk should authenticate with this server"}
+                </div>
               </div>
-              <button className="icon-button" title="Close" onClick={() => setShowSshDialog(false)}><X size={15} /></button>
+              <button className="icon-button" title="Close" onClick={closeSshDialog}><X size={15} /></button>
             </div>
             <div className="ssh-form">
               <label><span>Name</span><input value={sshDraft.name} placeholder="Production server" onChange={(event) => setSshDraft({ ...sshDraft, name: event.target.value })} /></label>
@@ -588,12 +763,78 @@ const DiskList = () => {
                 <label><span>Port</span><input type="number" min="1" max="65535" value={sshDraft.port} onChange={(event) => setSshDraft({ ...sshDraft, port: Number(event.target.value) })} /></label>
                 <label><span>Remote path</span><input value={sshDraft.path} placeholder="/" onChange={(event) => setSshDraft({ ...sshDraft, path: event.target.value })} /></label>
               </div>
-              <div className="ssh-form-note">Password prompts are not stored or shown. Configure key-based login in Terminal before scanning.</div>
+              <div className="ssh-auth-method" role="group" aria-label="SSH authentication method">
+                <button
+                  type="button"
+                  className={sshDraft.authMethod === "password" ? "active" : ""}
+                  onClick={() => setSshDraft({ ...sshDraft, authMethod: "password" })}
+                >
+                  <LockKeyhole size={14} />
+                  Password
+                </button>
+                <button
+                  type="button"
+                  className={sshDraft.authMethod === "key" ? "active" : ""}
+                  onClick={() => setSshDraft({ ...sshDraft, authMethod: "key", password: "" })}
+                >
+                  <KeyRound size={14} />
+                  I have configured an SSH key
+                </button>
+              </div>
+              {sshDraft.authMethod === "password" && (
+                <label>
+                  <span>Password</span>
+                  <div className="ssh-password-field">
+                    <input
+                      type={showSshPassword ? "text" : "password"}
+                      value={sshDraft.password}
+                      autoComplete="off"
+                      placeholder={
+                        editingSshConnection?.authMethod === "password"
+                          ? "Leave blank to keep the current password"
+                          : "SSH account password"
+                      }
+                      onChange={(event) => setSshDraft({ ...sshDraft, password: event.target.value })}
+                    />
+                    <button
+                      type="button"
+                      className="icon-button"
+                      title={showSshPassword ? "Hide password" : "Show password"}
+                      aria-label={showSshPassword ? "Hide password" : "Show password"}
+                      onClick={() => setShowSshPassword((visible) => !visible)}
+                    >
+                      {showSshPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                </label>
+              )}
+              <div className="ssh-form-note">
+                {sshDraft.authMethod === "password"
+                  ? editingSshConnection?.authMethod === "password"
+                    ? "Leave the password blank to keep it unchanged. Passwords are stored in macOS Keychain."
+                    : "The password is stored in macOS Keychain and is never written to DuckDisk's connection file."
+                  : "DuckDisk uses macOS ssh, ~/.ssh/config, SSH Agent, and your existing private keys."}
+              </div>
+              {cloudError && (
+                <div className="inline-alert inline-alert-error">
+                  {cloudError}
+                </div>
+              )}
               <div className="ssh-form-actions">
-                <button className="button button-secondary" onClick={() => setShowSshDialog(false)}>Cancel</button>
-                <button className="button button-primary" disabled={!sshDraft.host.trim() || cloudBusy !== null} onClick={saveSshConnection}>
+                <button className="button button-secondary" onClick={closeSshDialog}>Cancel</button>
+                <button
+                  className="button button-primary"
+                  disabled={
+                    !sshDraft.host.trim()
+                    || (sshDraft.authMethod === "password"
+                      && !sshDraft.password
+                      && editingSshConnection?.authMethod !== "password")
+                    || cloudBusy !== null
+                  }
+                  onClick={saveSshConnection}
+                >
                   {cloudBusy === "ssh-save" && <RefreshCw size={14} className="animate-spin" />}
-                  Save Connection
+                  {editingSshConnection ? "Save Changes" : "Save Connection"}
                 </button>
               </div>
             </div>
@@ -662,7 +903,7 @@ const DiskList = () => {
               {googleAccountToRevoke && (
                 <div className="rounded border border-red-400/30 bg-red-950/20 p-4">
                   <div className="font-semibold text-red-100">
-                    Revoke Google Drive access for {googleAccountToRevoke.email}?
+                    Revoke Google Drive access for {googleAccountToRevoke.name}?
                   </div>
                   <p className="mt-2 text-xs leading-5 text-red-200/80">
                     This invalidates DuckDisk's Google token and removes the saved
