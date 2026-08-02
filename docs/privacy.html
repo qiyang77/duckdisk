@@ -33,7 +33,7 @@
           <p class="eyebrow">DuckDisk legal</p>
           <h1>Privacy Policy</h1>
           <p>How DuckDisk handles local storage data and connected cloud accounts.</p>
-          <div class="legal-updated">Effective August 1, 2026</div>
+          <div class="legal-updated">Effective August 3, 2026</div>
         </header>
         <article class="legal-content">
           <section>
@@ -55,6 +55,17 @@
             <p>Metadata is used only to build the storage tree, calculate totals, update cached results, and perform actions you explicitly request. OAuth refresh tokens are stored in macOS Keychain. Scan indexes and connected-account records are stored locally on your Mac.</p>
           </section>
           <section>
+            <h2>Data protection and security</h2>
+            <ul>
+              <li>OAuth refresh tokens and saved SSH passwords are stored in macOS Keychain, which applies macOS encryption and access controls. DuckDisk does not write these credentials to its scan cache or connection files.</li>
+              <li>Google Drive and OneDrive requests are sent directly from DuckDisk to the providers' HTTPS endpoints using TLS. SSH connections use the encrypted SSH protocol.</li>
+              <li>OAuth access tokens are short-lived, used only in memory for provider requests, and are not included in DuckDisk logs or scan caches.</li>
+              <li>Scan metadata and account records stay in DuckDisk's application data under the current macOS user account and are protected by the account's standard macOS file permissions. DuckDisk does not upload this local data to a DuckDisk-operated server.</li>
+              <li>Users can clear scan caches, disconnect cloud accounts, and revoke Google authorization. These actions remove the associated local metadata and saved DuckDisk credential, as described below.</li>
+            </ul>
+            <p>No security measure can guarantee absolute protection. Users should keep macOS updated, protect their login account, and install DuckDisk only from the official release page.</p>
+          </section>
+          <section>
             <h2>Cloud actions</h2>
             <p>When you choose to remove an item, DuckDisk asks Microsoft OneDrive or Google Drive to move that item to the provider's recoverable trash. DuckDisk does not permanently empty provider trash. No cloud item is changed without a user-initiated action.</p>
           </section>
@@ -64,7 +75,7 @@
           </section>
           <section>
             <h2>Google API data</h2>
-            <p>DuckDisk's use and transfer of information received from Google APIs complies with the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+            <p>DuckDisk's use and transfer of information received from Google APIs complies with the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements. Google Workspace API data is not used to develop, improve, or train generalized or non-personalized artificial intelligence or machine-learning models.</p>
           </section>
           <section>
             <h2>Retention and deletion</h2>
