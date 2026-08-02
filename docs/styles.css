@@ -209,7 +209,7 @@ a {
 }
 
 .hero-backdrop {
-  background-image: url("screenshots/scan-results.png?v=0.5.7");
+  background-image: url("screenshots/scan-results.png?v=0.5.7-2");
   background-position: center bottom;
   background-repeat: no-repeat;
   background-size: cover;
@@ -398,7 +398,6 @@ h3 {
 }
 
 .product-shot img {
-  border-radius: 10px 10px 0 0;
   display: block;
   height: auto;
   width: 100%;
@@ -1043,7 +1042,6 @@ code {
   }
 
   .product-shot img {
-    border-radius: 0;
     min-height: 250px;
     object-fit: cover;
     object-position: left center;
