@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root_dir="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root_dir"
+
+export CI=true
+export APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-Developer ID Application: Qi Yang (PH4H68P6G5)}"
+
+version="$(node -p "require('./package.json').version")"
+arch="$(uname -m)"
+if [[ "$arch" == "aarch64" ]]; then
+  arch="arm64"
+fi
+
+if [[ -n "${APPLE_NOTARY_PROFILE:-}" ]]; then
+  notary_args=(--keychain-profile "$APPLE_NOTARY_PROFILE")
+elif [[ -n "${APPLE_ID:-}" && -n "${APPLE_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]; then
+  notary_args=(
+    --apple-id "$APPLE_ID"
+    --password "$APPLE_PASSWORD"
+    --team-id "$APPLE_TEAM_ID"
+  )
+else
+  notary_args=(--keychain-profile duckdisk-notary)
+fi
+
+echo "Building and signing DuckDisk.app..."
+# Tauri 1.2 uses Apple's retired notarization uploader. Keep notarization
+# credentials away from the bundler and submit with notarytool below.
+env -u APPLE_ID -u APPLE_PASSWORD -u APPLE_TEAM_ID \
+  npm run tauri -- build --bundles app
+
+source_app="src-tauri/target/release/bundle/macos/DuckDisk.app"
+test -d "$source_app"
+
+work_dir="$(mktemp -d "${TMPDIR:-/tmp}/duckdisk-release.XXXXXX")"
+mount_dir="$work_dir/mount"
+mounted=false
+
+cleanup() {
+  if [[ "$mounted" == true ]]; then
+    hdiutil detach "$mount_dir" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
+clean_app="$work_dir/DuckDisk.app"
+ditto --noextattr --norsrc "$source_app" "$clean_app"
+xattr -cr "$clean_app"
+codesign --force --deep --options runtime --timestamp \
+  --sign "$APPLE_SIGNING_IDENTITY" "$clean_app"
+codesign --verify --deep --strict --verbose=2 "$clean_app"
+codesign -d --verbose=4 "$clean_app" 2>&1 | grep -q 'flags=.*runtime'
+
+echo "Notarizing DuckDisk.app..."
+app_zip="$work_dir/DuckDisk.zip"
+ditto -c -k --keepParent "$clean_app" "$app_zip"
+xcrun notarytool submit "$app_zip" "${notary_args[@]}" --wait
+xcrun stapler staple "$clean_app"
+xcrun stapler validate "$clean_app"
+spctl --assess --type execute --verbose=4 "$clean_app"
+
+echo "Creating signed DMG..."
+image_size_mb="$(( $(du -sm "$clean_app" | awk '{print $1}') + 24 ))"
+rw_dmg="$work_dir/DuckDisk-rw.dmg"
+hdiutil create -size "${image_size_mb}m" -fs HFS+ -volname DuckDisk "$rw_dmg"
+
+mkdir -p "$mount_dir"
+hdiutil attach -nobrowse -mountpoint "$mount_dir" "$rw_dmg" >/dev/null
+mounted=true
+ditto --noextattr --norsrc "$clean_app" "$mount_dir/DuckDisk.app"
+ln -s /Applications "$mount_dir/Applications"
+xattr -cr "$mount_dir/DuckDisk.app"
+codesign --verify --deep --strict --verbose=2 "$mount_dir/DuckDisk.app"
+hdiutil detach "$mount_dir" >/dev/null
+mounted=false
+
+compressed_dmg="$work_dir/DuckDisk_${version}_${arch}.dmg"
+hdiutil convert "$rw_dmg" -format UDZO -imagekey zlib-level=9 -o "$compressed_dmg" >/dev/null
+codesign --force --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$compressed_dmg"
+
+echo "Notarizing DMG..."
+xcrun notarytool submit "$compressed_dmg" "${notary_args[@]}" --wait
+xcrun stapler staple "$compressed_dmg"
+xcrun stapler validate "$compressed_dmg"
+hdiutil verify "$compressed_dmg"
+spctl --assess --type open --context context:primary-signature --verbose=4 "$compressed_dmg"
+
+dmg_dir="src-tauri/target/release/bundle/dmg"
+mkdir -p "$dmg_dir"
+final_dmg="$dmg_dir/DuckDisk_${version}_${arch}.dmg"
+ditto --noextattr "$compressed_dmg" "$final_dmg"
+
+echo "Release DMG: $final_dmg"
