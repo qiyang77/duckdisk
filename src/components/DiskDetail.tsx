@@ -3,7 +3,6 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
-import { removeDir, removeFile } from "@tauri-apps/api/fs";
 import * as d3 from "d3";
 import surfingDuck from "../assets/duck-disc-surf.png";
 import { formatBytes } from "../formatBytes";
@@ -1305,9 +1304,10 @@ const Scanning = () => {
     } else {
       for (const node of deleteList) {
         try {
-          await removeDir(node.id, { recursive: true }).catch(() =>
-            removeFile(node.id)
-          );
+          await invoke("delete_local_item", {
+            scanRoot: disk,
+            itemPath: node.id,
+          });
           successfulIds.add(node.id);
         } catch (error) {
           console.error(error);

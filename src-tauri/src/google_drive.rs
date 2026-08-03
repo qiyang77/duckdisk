@@ -423,14 +423,8 @@ pub fn stop_scan(account_id: &str) {
 }
 
 pub fn read_scan_result(path: &str) -> Result<String, String> {
-    let path = PathBuf::from(path);
-    if !path.starts_with(std::env::temp_dir())
-        || !path.file_name().and_then(|name| name.to_str())
-            .map(|name| name.starts_with("duckdisk-google-drive-scan-"))
-            .unwrap_or(false)
-    {
-        return Err("Refusing to read Google Drive result outside the temporary directory".to_string());
-    }
+    let prefix = format!("duckdisk-google-drive-scan-{}-", std::process::id());
+    let path = crate::temp_files::validate_result_file(path, &prefix)?;
     fs::read_to_string(path).map_err(|err| err.to_string())
 }
 

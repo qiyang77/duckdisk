@@ -206,8 +206,12 @@ pub fn save_connection(
     if host.is_empty() {
         return Err("Enter an SSH host or alias".to_string());
     }
+    validate_ssh_host(host)?;
     if path.is_empty() || !path.starts_with('/') {
         return Err("Remote path must be an absolute path".to_string());
+    }
+    if path.contains(['\0', '\n', '\r']) {
+        return Err("Remote path contains unsupported control characters".to_string());
     }
     if input.port == 0 {
         return Err("SSH port must be between 1 and 65535".to_string());
@@ -462,7 +466,7 @@ pub fn delete_items(
         .find(|item| item.id == connection_id)
         .ok_or_else(|| "SSH connection was not found".to_string())?;
     let remote_script = r#"import json, os, stat, sys
-root = os.path.abspath(sys.argv[1])
+root = os.path.realpath(sys.argv[1])
 requested = json.loads(sys.argv[2])
 deleted = []
 failures = []
@@ -479,7 +483,8 @@ def remove_tree(path):
                 os.unlink(entry.path)
     os.rmdir(path)
 for raw in requested:
-    path = os.path.abspath(raw)
+    absolute = os.path.abspath(raw)
+    path = os.path.join(os.path.realpath(os.path.dirname(absolute)), os.path.basename(absolute))
     try:
         inside = os.path.commonpath([root, path]) == root
     except ValueError:
@@ -539,16 +544,8 @@ print(json.dumps({"deletedIds": deleted, "failures": failures}, separators=(",",
 }
 
 pub fn read_scan_result(path: &str) -> Result<String, String> {
-    let path = PathBuf::from(path);
-    if !path.starts_with(std::env::temp_dir())
-        || !path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(|name| name.starts_with("duckdisk-ssh-scan-"))
-            .unwrap_or(false)
-    {
-        return Err("Refusing to read SSH result outside the temporary directory".to_string());
-    }
+    let prefix = format!("duckdisk-ssh-scan-{}-", std::process::id());
+    let path = crate::temp_files::validate_result_file(path, &prefix)?;
     fs::read_to_string(path).map_err(|err| err.to_string())
 }
 
@@ -721,6 +718,13 @@ fn ssh_command(connection: &SshConnection) -> Result<Command, String> {
     Ok(command)
 }
 
+fn validate_ssh_host(host: &str) -> Result<(), String> {
+    if host.starts_with('-') || host.chars().any(char::is_whitespace) || host.contains('\0') {
+        return Err("SSH host or alias cannot start with '-' or contain whitespace".to_string());
+    }
+    Ok(())
+}
+
 fn parse_progress(line: &str) -> Option<(u64, u64)> {
     let values = line.strip_prefix(PROGRESS_PREFIX)?;
     let mut parts = values.split('\t');
@@ -871,6 +875,13 @@ mod tests {
     fn shell_quotes_remote_values() {
         assert_eq!(shell_quote("/tmp/a b"), "'/tmp/a b'");
         assert_eq!(shell_quote("a'b"), "'a'\"'\"'b'");
+    }
+
+    #[test]
+    fn rejects_ssh_option_injection_as_a_host() {
+        assert!(validate_ssh_host("-oProxyCommand=bad").is_err());
+        assert!(validate_ssh_host("host name").is_err());
+        assert!(validate_ssh_host("server.example.com").is_ok());
     }
 
     #[test]

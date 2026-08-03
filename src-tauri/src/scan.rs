@@ -13,6 +13,7 @@ use tauri::api::process::{Command as TauriCommand, CommandEvent};
 use tauri::Manager;
 
 use crate::MyState;
+use crate::temp_files::validate_result_file;
 
 static ACTIVE_INCREMENTAL_SCANS: Lazy<Mutex<HashSet<String>>> =
     Lazy::new(|| Mutex::new(HashSet::new()));
@@ -766,12 +767,8 @@ pub fn read_result(
     scan_path: String,
     ratio: String,
 ) -> Result<String, String> {
-    let path = PathBuf::from(path);
-    let temp_dir = std::env::temp_dir();
-
-    if !path.starts_with(&temp_dir) {
-        return Err("Refusing to read scan result outside the temporary directory".to_string());
-    }
+    let prefix = format!("duckdisk-scan-{}-", std::process::id());
+    let path = validate_result_file(&path, &prefix)?;
 
     let content = fs::read_to_string(&path).map_err(|err| err.to_string())?;
     fs::remove_file(path).ok();
@@ -780,14 +777,8 @@ pub fn read_result(
 }
 
 pub fn read_error_report(path: String) -> Result<String, String> {
-    let path = PathBuf::from(path);
-    let temp_dir = std::env::temp_dir();
-
-    if !path.starts_with(&temp_dir) {
-        return Err(
-            "Refusing to read scan error report outside the temporary directory".to_string(),
-        );
-    }
+    let prefix = format!("duckdisk-scan-errors-{}-", std::process::id());
+    let path = validate_result_file(&path, &prefix)?;
 
     let content = fs::read_to_string(&path).map_err(|err| err.to_string())?;
     fs::remove_file(path).ok();

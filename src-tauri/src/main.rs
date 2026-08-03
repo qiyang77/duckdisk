@@ -1,7 +1,9 @@
 mod google_drive;
+mod local_files;
 mod onedrive;
 mod scan;
 mod ssh;
+mod temp_files;
 mod updates;
 mod window_style;
 
@@ -57,6 +59,7 @@ fn main() {
             read_cached_scan_result,
             has_cached_scan_index,
             clear_cached_scan_result,
+            delete_local_item,
             refresh_scan_path,
             get_onedrive_state,
             connect_onedrive_account,
@@ -190,6 +193,11 @@ fn clear_cached_scan_result(
     ratio: String,
 ) -> Result<(), String> {
     scan::clear_cached_result(app_handle, scan_path, ratio)
+}
+
+#[tauri::command]
+fn delete_local_item(scan_root: String, item_path: String) -> Result<(), String> {
+    local_files::delete_item(&scan_root, &item_path)
 }
 
 #[tauri::command]
