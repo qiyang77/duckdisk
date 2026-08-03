@@ -1,6 +1,3 @@
-declare module "mongoid-js";
-declare module "shade-blend-color";
-
 interface DiskItem {
   id: string;
   name: string;
@@ -25,11 +22,4 @@ interface D3HierarchyDiskItem extends d3.HierarchyRectangularNode<DiskItem> {
   children: this[];
   data: DiskItem;
   each: any;
-  //   value: number;
-  //   height: number;
-  //   depth: number;
-  //   x0: number;
-  //   x1: number;
-  //   y0: number;
-  //   y1: number;
 }
