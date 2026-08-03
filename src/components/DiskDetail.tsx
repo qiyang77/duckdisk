@@ -1520,7 +1520,7 @@ const Scanning = () => {
             )}
             {loadedFromCache && (
               <span className="status-chip status-chip-success">
-                {isSsh ? "Cached" : isCloud ? "Delta updated" : "Cached"}
+                Cached
               </span>
             )}
           </div>

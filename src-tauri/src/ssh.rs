@@ -44,6 +44,8 @@ pub struct SshConnection {
     pub path: String,
     #[serde(default)]
     pub auth_method: SshAuthMethod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_usage: Option<SshStorageUsage>,
 }
 
 #[derive(Deserialize)]
@@ -160,8 +162,26 @@ print(json.dumps({"totalSpace":total,"usedSpace":max(0,total-available),"availab
             format!("SSH storage query failed: {stderr}")
         });
     }
-    serde_json::from_slice(&output.stdout)
-        .map_err(|err| format!("SSH storage query returned invalid JSON: {err}"))
+    let usage: SshStorageUsage = serde_json::from_slice(&output.stdout)
+        .map_err(|err| format!("SSH storage query returned invalid JSON: {err}"))?;
+    if let Err(error) = store_storage_usage(app_handle, connection_id, &usage) {
+        eprintln!("Could not cache SSH storage usage: {error}");
+    }
+    Ok(usage)
+}
+
+fn store_storage_usage(
+    app_handle: &tauri::AppHandle,
+    connection_id: &str,
+    usage: &SshStorageUsage,
+) -> Result<(), String> {
+    let mut connections = read_connections(app_handle)?;
+    let connection = connections
+        .iter_mut()
+        .find(|item| item.id == connection_id)
+        .ok_or_else(|| "SSH connection was not found".to_string())?;
+    connection.storage_usage = Some(usage.clone());
+    write_connections(app_handle, &connections)
 }
 
 pub fn run_askpass_helper() -> Result<bool, String> {
@@ -232,6 +252,7 @@ pub fn save_connection(
         port: input.port,
         path: path.to_string(),
         auth_method: input.auth_method,
+        storage_usage: None,
     };
     let previous_connections = connections.clone();
     if let Some(index) = existing_index {

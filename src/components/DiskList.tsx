@@ -64,6 +64,7 @@ type SshConnection = {
   port: number;
   path: string;
   authMethod: "key" | "password";
+  storageUsage?: SshStorageUsage | null;
 };
 
 type SshStorageUsage = {
@@ -170,6 +171,15 @@ const DiskList = () => {
   const syncSshConnections = async () => {
     const connections = await invoke<SshConnection[]>("get_ssh_connections");
     setSshConnections(connections);
+    setSshStorageUsage(
+      Object.fromEntries(
+        connections.flatMap((connection) =>
+          connection.storageUsage
+            ? [[connection.id, connection.storageUsage] as const]
+            : []
+        )
+      )
+    );
     void Promise.all(
       connections.map(async (connection) => {
         try {
@@ -181,10 +191,12 @@ const DiskList = () => {
             [connection.id]: usage,
           }));
         } catch {
-          setSshStorageUsage((current) => ({
-            ...current,
-            [connection.id]: null,
-          }));
+          if (!connection.storageUsage) {
+            setSshStorageUsage((current) => ({
+              ...current,
+              [connection.id]: null,
+            }));
+          }
         }
       })
     );
