@@ -9,7 +9,7 @@ import { open as openExternal } from "@tauri-apps/api/shell";
 import folderIcon from "../assets/folder.png";
 import oneDriveIcon from "../assets/onedrive.svg";
 import googleDriveIcon from "../assets/google-drive.png";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "../router";
 import { formatBytes } from "../formatBytes";
 import { forgetDiskRoute } from "../diskRoute";
 import {

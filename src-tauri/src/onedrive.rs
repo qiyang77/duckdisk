@@ -8,10 +8,9 @@ use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use oauth2::basic::BasicClient;
-use oauth2::reqwest::async_http_client;
 use oauth2::{
-    AuthUrl, AuthorizationCode, ClientId, CsrfToken, PkceCodeChallenge, RedirectUrl, RefreshToken,
-    Scope, TokenResponse, TokenUrl,
+    AuthUrl, AuthorizationCode, ClientId, CsrfToken, EndpointNotSet, EndpointSet,
+    PkceCodeChallenge, RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
 };
 use once_cell::sync::Lazy;
 use reqwest::{Client, StatusCode};
@@ -31,6 +30,9 @@ const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 const ACCESS_TOKEN_REFRESH_INTERVAL: Duration = Duration::from_secs(45 * 60);
 const CHECKPOINT_ITEM_INTERVAL: u64 = 20_000;
 const SCAN_CANCELLED_MESSAGE: &str = "OneDrive scan cancelled.";
+
+type ConfiguredBasicClient =
+    BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
 #[derive(Clone, Copy)]
 enum ActiveScanPhase {
@@ -243,10 +245,11 @@ pub async fn connect_account(app_handle: &tauri::AppHandle) -> Result<OneDriveAc
     .await
     .map_err(|err| err.to_string())??;
 
+    let oauth_http = oauth_http_client()?;
     let token = oauth_client
         .exchange_code(AuthorizationCode::new(code))
         .set_pkce_verifier(pkce_verifier)
-        .request_async(async_http_client)
+        .request_async(&oauth_http)
         .await
         .map_err(|err| format!("Microsoft sign-in failed: {err}"))?;
     let refresh_token = token
@@ -859,9 +862,10 @@ fn build_node(
 async fn refresh_access_token(account_id: &str) -> Result<String, String> {
     let client_id = required_client_id()?;
     let credential = read_credential(account_id)?;
+    let oauth_http = oauth_http_client()?;
     let token = oauth_client(&client_id, None)?
         .exchange_refresh_token(&RefreshToken::new(credential.refresh_token.clone()))
-        .request_async(async_http_client)
+        .request_async(&oauth_http)
         .await
         .map_err(|err| format!("Could not refresh Microsoft sign-in: {err}"))?;
 
@@ -1096,23 +1100,36 @@ fn write_callback_response(
         .map_err(|err| err.to_string())
 }
 
-fn oauth_client(client_id: &str, redirect: Option<&str>) -> Result<BasicClient, String> {
-    let client = BasicClient::new(
-        ClientId::new(client_id.to_string()),
-        None,
-        AuthUrl::new("https://login.microsoftonline.com/common/oauth2/v2.0/authorize".to_string())
+fn oauth_client(
+    client_id: &str,
+    redirect: Option<&str>,
+) -> Result<ConfiguredBasicClient, String> {
+    let client = BasicClient::new(ClientId::new(client_id.to_string()))
+        .set_auth_uri(
+            AuthUrl::new(
+                "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".to_string(),
+            )
             .map_err(|err| err.to_string())?,
-        Some(
-            TokenUrl::new("https://login.microsoftonline.com/common/oauth2/v2.0/token".to_string())
-                .map_err(|err| err.to_string())?,
-        ),
-    );
+        )
+        .set_token_uri(
+            TokenUrl::new(
+                "https://login.microsoftonline.com/common/oauth2/v2.0/token".to_string(),
+            )
+            .map_err(|err| err.to_string())?,
+        );
     match redirect {
         Some(redirect) => Ok(client.set_redirect_uri(
             RedirectUrl::new(redirect.to_string()).map_err(|err| err.to_string())?,
         )),
         None => Ok(client),
     }
+}
+
+fn oauth_http_client() -> Result<Client, String> {
+    Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|err| format!("Could not configure OAuth client: {err}"))
 }
 
 fn client_id() -> String {

@@ -12,10 +12,9 @@ use std::sync::{
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use oauth2::basic::BasicClient;
-use oauth2::reqwest::async_http_client;
 use oauth2::{
-    AuthType, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
-    RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
+    AuthType, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointNotSet,
+    EndpointSet, PkceCodeChallenge, RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
 };
 use once_cell::sync::Lazy;
 use reqwest::{Client, StatusCode};
@@ -30,6 +29,9 @@ const CACHE_VERSION: &str = "duckdisk-google-drive-cache-v1";
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(120);
 const USER_CAP_MESSAGE: &str = "Google Drive sign-in is temporarily unavailable because DuckDisk has reached Google's 100-user limit. Please check for a newer DuckDisk release or try again after the app completes Google verification.";
 const SCAN_CANCELLED_MESSAGE: &str = "Google Drive scan cancelled.";
+
+type ConfiguredBasicClient =
+    BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
 static ACTIVE_SCANS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 static CANCELLED_SCANS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
@@ -232,10 +234,11 @@ pub async fn connect_account(app_handle: &tauri::AppHandle) -> Result<GoogleDriv
     .await
     .map_err(|err| err.to_string())??;
 
+    let oauth_http = oauth_http_client()?;
     let token = oauth_client
         .exchange_code(AuthorizationCode::new(code))
         .set_pkce_verifier(pkce_verifier)
-        .request_async(async_http_client)
+        .request_async(&oauth_http)
         .await
         .map_err(|err| google_token_error_message(&format!("{err:?}")))?;
     let refresh_token = token
@@ -768,9 +771,10 @@ fn google_error_message(status: StatusCode, body: &str) -> String {
 
 async fn refresh_access_token(account_id: &str) -> Result<String, String> {
     let credential = read_credential(account_id)?;
+    let oauth_http = oauth_http_client()?;
     let token = oauth_client(&required_client_id()?, &required_client_secret()?, None)?
         .exchange_refresh_token(&RefreshToken::new(credential.refresh_token))
-        .request_async(async_http_client)
+        .request_async(&oauth_http)
         .await
         .map_err(|err| format!("Could not refresh Google sign-in: {err}"))?;
     Ok(token.access_token().secret().to_string())
@@ -780,17 +784,29 @@ fn oauth_client(
     client_id: &str,
     client_secret: &str,
     redirect: Option<&str>,
-) -> Result<BasicClient, String> {
-    let client = BasicClient::new(
-        ClientId::new(client_id.to_string()),
-        Some(ClientSecret::new(client_secret.to_string())),
-        AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).map_err(|err| err.to_string())?,
-        Some(TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).map_err(|err| err.to_string())?),
-    ).set_auth_type(AuthType::RequestBody);
+) -> Result<ConfiguredBasicClient, String> {
+    let client = BasicClient::new(ClientId::new(client_id.to_string()))
+        .set_client_secret(ClientSecret::new(client_secret.to_string()))
+        .set_auth_uri(
+            AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string())
+                .map_err(|err| err.to_string())?,
+        )
+        .set_token_uri(
+            TokenUrl::new("https://oauth2.googleapis.com/token".to_string())
+                .map_err(|err| err.to_string())?,
+        )
+        .set_auth_type(AuthType::RequestBody);
     match redirect {
         Some(uri) => Ok(client.set_redirect_uri(RedirectUrl::new(uri.to_string()).map_err(|err| err.to_string())?)),
         None => Ok(client),
     }
+}
+
+fn oauth_http_client() -> Result<Client, String> {
+    Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|err| format!("Could not configure OAuth client: {err}"))
 }
 
 fn client_id() -> String { env!("DUCKDISK_GOOGLE_CLIENT_ID").trim().to_string() }

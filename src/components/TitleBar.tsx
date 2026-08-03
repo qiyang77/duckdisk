@@ -1,5 +1,5 @@
 import Logo from "../assets/duck.png";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation } from "../router";
 import { appWindow } from "@tauri-apps/api/window";
 import { ChevronRight, Maximize2, Minus, X } from "lucide-react";
 

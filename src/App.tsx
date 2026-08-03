@@ -1,24 +1,25 @@
-import { MemoryRouter as Router, Route, Routes } from "react-router-dom";
-
 import TitleBar from "./components/TitleBar";
 import DiskList from "./components/DiskList";
 import DiskDetail from "./components/DiskDetail";
 import { readDiskRoute } from "./diskRoute";
+import { Router, useLocation } from "./router";
+
+const CurrentPage = () => {
+  const { pathname } = useLocation();
+  return pathname === "/disk" ? <DiskDetail /> : <DiskList />;
+};
 
 function App() {
   const diskRoute = readDiskRoute();
-  const initialEntries = diskRoute
-    ? [{ pathname: "/disk", state: diskRoute }]
-    : ["/"];
+  const initialLocation = diskRoute
+    ? { pathname: "/disk", state: diskRoute }
+    : { pathname: "/" };
 
   return (
-    <Router initialEntries={initialEntries}>
+    <Router initialLocation={initialLocation}>
       <div className="app-shell">
         <TitleBar></TitleBar>
-        <Routes>
-          <Route path="/" element={<DiskList />} />
-          <Route path="/disk" element={<DiskDetail />} />
-        </Routes>
+        <CurrentPage />
       </div>
     </Router>
   );
