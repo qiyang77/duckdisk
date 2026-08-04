@@ -679,11 +679,7 @@ async fn google_trash_item(
     access_token: &str,
     item_id: &str,
 ) -> Result<(), String> {
-    let mut url = Url::parse(&format!("{API_ROOT}/files/"))
-        .map_err(|err| err.to_string())?;
-    url.path_segments_mut()
-        .map_err(|_| "Could not build Google Drive item URL".to_string())?
-        .push(item_id);
+    let mut url = google_drive_item_url(item_id)?;
     url.query_pairs_mut()
         .append_pair("supportsAllDrives", "true")
         .append_pair("fields", "id,trashed");
@@ -753,6 +749,15 @@ async fn google_trash_item(
         }
         return Err(message);
     }
+}
+
+fn google_drive_item_url(item_id: &str) -> Result<Url, String> {
+    let mut url = Url::parse(API_ROOT).map_err(|err| err.to_string())?;
+    url.path_segments_mut()
+        .map_err(|_| "Could not build Google Drive item URL".to_string())?
+        .push("files")
+        .push(item_id);
+    Ok(url)
 }
 
 fn is_retryable_delete_status(status: StatusCode) -> bool {
@@ -1110,5 +1115,12 @@ mod tests {
     fn distinguishes_cancelled_google_oauth() {
         let message = google_oauth_error_message("access_denied", None);
         assert_eq!(message, "Google Drive access was not granted.");
+    }
+
+    #[test]
+    fn builds_google_drive_item_url_without_an_empty_path_segment() {
+        let url = google_drive_item_url("file-id").unwrap();
+
+        assert_eq!(url.as_str(), "https://www.googleapis.com/drive/v3/files/file-id");
     }
 }
