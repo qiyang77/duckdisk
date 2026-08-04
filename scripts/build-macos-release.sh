@@ -54,7 +54,8 @@ xattr -cr "$clean_app"
 codesign --force --deep --options runtime --timestamp \
   --sign "$APPLE_SIGNING_IDENTITY" "$clean_app"
 codesign --verify --deep --strict --verbose=2 "$clean_app"
-codesign -d --verbose=4 "$clean_app" 2>&1 | grep -q 'flags=.*runtime'
+codesign_details="$(codesign -d --verbose=4 "$clean_app" 2>&1)"
+grep -q 'flags=.*runtime' <<< "$codesign_details"
 
 if [[ "$skip_notarization" == "1" ]]; then
   echo "Skipping DuckDisk.app notarization by request."
