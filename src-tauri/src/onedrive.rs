@@ -23,6 +23,8 @@ use std::sync::{
 use tauri::Manager;
 use url::Url;
 
+use crate::oauth_config;
+
 const GRAPH_ROOT: &str = "https://graph.microsoft.com/v1.0";
 const KEYCHAIN_SERVICE: &str = "com.duckdisk.dev.onedrive";
 const CACHE_VERSION: &str = "duckdisk-onedrive-cache-v1";
@@ -1100,10 +1102,7 @@ fn write_callback_response(
         .map_err(|err| err.to_string())
 }
 
-fn oauth_client(
-    client_id: &str,
-    redirect: Option<&str>,
-) -> Result<ConfiguredBasicClient, String> {
+fn oauth_client(client_id: &str, redirect: Option<&str>) -> Result<ConfiguredBasicClient, String> {
     let client = BasicClient::new(ClientId::new(client_id.to_string()))
         .set_auth_uri(
             AuthUrl::new(
@@ -1112,10 +1111,8 @@ fn oauth_client(
             .map_err(|err| err.to_string())?,
         )
         .set_token_uri(
-            TokenUrl::new(
-                "https://login.microsoftonline.com/common/oauth2/v2.0/token".to_string(),
-            )
-            .map_err(|err| err.to_string())?,
+            TokenUrl::new("https://login.microsoftonline.com/common/oauth2/v2.0/token".to_string())
+                .map_err(|err| err.to_string())?,
         );
     match redirect {
         Some(redirect) => Ok(client.set_redirect_uri(
@@ -1133,16 +1130,13 @@ fn oauth_http_client() -> Result<Client, String> {
 }
 
 fn client_id() -> String {
-    env!("DUCKDISK_ONEDRIVE_CLIENT_ID").trim().to_string()
+    oauth_config::onedrive_client_id().trim().to_string()
 }
 
 fn required_client_id() -> Result<String, String> {
     let client_id = client_id();
     if client_id.is_empty() {
-        Err(
-            "OneDrive is not configured in this build. Set DUCKDISK_ONEDRIVE_CLIENT_ID and rebuild."
-                .to_string(),
-        )
+        Err("OneDrive is not configured in this build.".to_string())
     } else {
         Ok(client_id)
     }

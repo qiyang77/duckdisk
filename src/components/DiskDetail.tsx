@@ -162,6 +162,14 @@ const getNodeName = (node: DiskItem) => {
   return node.id || "/";
 };
 
+const waitForUiPaint = () =>
+  new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+
+const compactDeleteError = (error: unknown) =>
+  String(error).replace(/\s+/g, " ").trim();
+
 const getFileExtension = (name: string) => {
   const trimmed = name.trim();
   if (!trimmed || trimmed.startsWith(".") || !trimmed.includes(".")) {
@@ -1253,9 +1261,11 @@ const Scanning = () => {
       failed: 0,
       error: null,
     });
+    await waitForUiPaint();
+
     const successfulIds = new Set<string>();
     const failedItems: DiskItem[] = [];
-    let cloudFailureMessage: string | null = null;
+    const failureMessages: string[] = [];
 
     if (isOneDrive || isGoogleDrive || isSsh) {
       try {
@@ -1279,7 +1289,11 @@ const Scanning = () => {
                   .filter((itemId): itemId is string => Boolean(itemId)),
               }
         );
-        cloudFailureMessage = result.failures[0]?.message || null;
+        failureMessages.push(
+          ...result.failures.map((failure) =>
+            compactDeleteError(failure.message)
+          )
+        );
         const deletedCloudIds = new Set(result.deletedIds);
         for (const node of deleteList) {
           if (node.cloudId && deletedCloudIds.has(node.cloudId)) {
@@ -1291,13 +1305,14 @@ const Scanning = () => {
       } catch (error) {
         console.error(error);
         failedItems.push(...deleteList);
+        const message = compactDeleteError(error);
         setDeleteList(deleteList);
         setDeleteState({
           isDeleting: false,
           total: deleteList.length,
           current: 0,
           failed: deleteList.length,
-          error: String(error),
+          error: message || "The delete operation could not be started",
         });
         return;
       }
@@ -1312,6 +1327,10 @@ const Scanning = () => {
         } catch (error) {
           console.error(error);
           failedItems.push(node);
+          const reason = compactDeleteError(error);
+          failureMessages.push(
+            `${getNodeName(node)}: ${reason || "Unknown deletion error"}`
+          );
         } finally {
           setDeleteState((current) => ({
             ...current,
@@ -1331,9 +1350,8 @@ const Scanning = () => {
     }
 
     setDeleteList(failedItems);
-    const compactCloudFailure = cloudFailureMessage
-      ?.replace(/\s+/g, " ")
-      .slice(0, 220);
+    const primaryFailure = failureMessages[0]?.slice(0, 220);
+    const additionalFailureCount = Math.max(0, failureMessages.length - 1);
     setDeleteState({
       isDeleting: false,
       total: deleteList.length,
@@ -1344,7 +1362,13 @@ const Scanning = () => {
             failedItems.length
           } item${
             failedItems.length === 1 ? "" : "s"
-          }${compactCloudFailure ? `: ${compactCloudFailure}` : ""}`
+          }${primaryFailure ? `: ${primaryFailure}` : ""}${
+            additionalFailureCount
+              ? ` (+${additionalFailureCount} more error${
+                  additionalFailureCount === 1 ? "" : "s"
+                })`
+              : ""
+          }`
         : null,
     });
   };

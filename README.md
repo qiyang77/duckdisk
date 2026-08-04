@@ -72,27 +72,32 @@ npm run build
 npm run tauri build
 ```
 
-### OneDrive development setup
+### OAuth development setup
 
-Create a Microsoft Entra app registration for personal Microsoft accounts and work/school accounts:
+DuckDisk's production Google Drive and OneDrive client IDs are public desktop-app
+identifiers stored in `src-tauri/src/oauth_config.rs`. Both providers use the
+Authorization Code flow with PKCE. OneDrive does not require a client secret.
+
+For a custom OneDrive integration, create a Microsoft Entra app registration for
+personal Microsoft accounts and work/school accounts:
 
 1. Configure it as a public mobile/desktop client.
 2. Add `http://localhost` as a redirect URI.
 3. Add delegated Microsoft Graph permission `Files.ReadWrite`.
 4. Do not create or embed a client secret.
 
-Pass its Application (client) ID when running or building DuckDisk:
+Override the production Application (client) ID when running or building DuckDisk:
 
 ```bash
 DUCKDISK_ONEDRIVE_CLIENT_ID=your-client-id npm run tauri dev
 DUCKDISK_ONEDRIVE_CLIENT_ID=your-client-id npm run tauri build
 ```
 
-For GitHub releases, set the repository Actions variable `ONEDRIVE_CLIENT_ID`.
-
-### Google Drive development setup
-
-Create a Google OAuth client with application type **Desktop app**, enable the Google Drive API, and add your Google account as a test user while the consent screen remains in testing. Supply the desktop client ID and client secret only at build time; do not commit them to the repository.
+For a custom Google Drive integration, create a Google OAuth client with application
+type **Desktop app**, enable the Google Drive API, and add your Google account as a
+test user while the consent screen remains in testing. Google's token endpoint
+currently requires the generated desktop client secret for this client. Supply it
+only at build time and optionally override the public client ID:
 
 ```bash
 DUCKDISK_GOOGLE_CLIENT_ID=your-client-id \
@@ -103,8 +108,6 @@ DUCKDISK_GOOGLE_CLIENT_ID=your-client-id \
 DUCKDISK_GOOGLE_CLIENT_SECRET=your-client-secret \
 npm run tauri build
 ```
-
-For GitHub releases, set the repository Actions variable `GOOGLE_DRIVE_CLIENT_ID` and Actions secret `GOOGLE_DRIVE_CLIENT_SECRET`.
 
 The macOS installer is generated under:
 

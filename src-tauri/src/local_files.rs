@@ -2,8 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub fn delete_item(scan_root: &str, item_path: &str) -> Result<(), String> {
-    let root = fs::canonicalize(scan_root)
-        .map_err(|err| format!("Could not resolve scan root: {err}"))?;
+    let root =
+        fs::canonicalize(scan_root).map_err(|err| format!("Could not resolve scan root: {err}"))?;
     let item = resolve_without_following_final_symlink(item_path)?;
 
     if item == root || !item.starts_with(&root) {
@@ -11,11 +11,12 @@ pub fn delete_item(scan_root: &str, item_path: &str) -> Result<(), String> {
     }
 
     let metadata = fs::symlink_metadata(&item)
-        .map_err(|err| format!("Could not inspect item: {err}"))?;
+        .map_err(|err| format!("Could not inspect {}: {err}", item.display()))?;
     if metadata.file_type().is_symlink() || metadata.is_file() {
-        fs::remove_file(&item).map_err(|err| format!("Could not delete item: {err}"))
+        fs::remove_file(&item).map_err(|err| format!("Could not delete {}: {err}", item.display()))
     } else if metadata.is_dir() {
-        fs::remove_dir_all(&item).map_err(|err| format!("Could not delete folder: {err}"))
+        fs::remove_dir_all(&item)
+            .map_err(|err| format!("Could not delete {}: {err}", item.display()))
     } else {
         Err("Refusing to delete a device or other special file".to_string())
     }
@@ -29,8 +30,8 @@ fn resolve_without_following_final_symlink(path: &str) -> Result<PathBuf, String
     let name = path
         .file_name()
         .ok_or_else(|| "Item path has no file name".to_string())?;
-    let parent = fs::canonicalize(parent)
-        .map_err(|err| format!("Could not resolve item parent: {err}"))?;
+    let parent =
+        fs::canonicalize(parent).map_err(|err| format!("Could not resolve item parent: {err}"))?;
     Ok(parent.join(name))
 }
 

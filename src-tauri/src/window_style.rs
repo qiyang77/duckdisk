@@ -22,7 +22,11 @@ pub fn set_window_styles(window: impl raw_window_handle::HasRawWindowHandle) -> 
                 appkit::{NSColor, NSWindow},
                 base::{id, nil},
             };
-            use objc::{msg_send, sel, sel_impl, runtime::{NO, YES}};
+            use objc::{
+                msg_send,
+                runtime::{NO, YES},
+                sel, sel_impl,
+            };
 
             unsafe {
                 let window = handle.ns_window as id;

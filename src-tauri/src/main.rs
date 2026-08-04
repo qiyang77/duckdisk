@@ -1,5 +1,6 @@
 mod google_drive;
 mod local_files;
+mod oauth_config;
 mod onedrive;
 mod scan;
 mod ssh;
@@ -391,12 +392,16 @@ fn clear_ssh_cached_scan_result(
 }
 
 #[tauri::command]
-fn delete_ssh_items(
+async fn delete_ssh_items(
     app_handle: tauri::AppHandle,
     connection_id: String,
     item_ids: Vec<String>,
 ) -> Result<ssh::SshDeleteResult, String> {
-    ssh::delete_items(&app_handle, &connection_id, item_ids)
+    tauri::async_runtime::spawn_blocking(move || {
+        ssh::delete_items(&app_handle, &connection_id, item_ids)
+    })
+    .await
+    .map_err(|err| format!("SSH deletion task failed: {err}"))?
 }
 
 #[tauri::command]

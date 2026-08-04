@@ -23,6 +23,8 @@ use serde_json::{json, Value};
 use tauri::Manager;
 use url::Url;
 
+use crate::oauth_config;
+
 const API_ROOT: &str = "https://www.googleapis.com/drive/v3";
 const DRIVE_SCOPE: &str = "https://www.googleapis.com/auth/drive";
 const KEYCHAIN_SERVICE: &str = "com.duckdisk.dev.googledrive";
@@ -274,10 +276,7 @@ pub fn disconnect_account(app_handle: &tauri::AppHandle, account_id: &str) -> Re
     Ok(())
 }
 
-pub async fn revoke_account(
-    app_handle: &tauri::AppHandle,
-    account_id: &str,
-) -> Result<(), String> {
+pub async fn revoke_account(app_handle: &tauri::AppHandle, account_id: &str) -> Result<(), String> {
     let credential = read_credential(account_id)?;
     let response = Client::new()
         .post("https://oauth2.googleapis.com/revoke")
@@ -379,7 +378,10 @@ pub fn start_scan(
     account_id: String,
     force_full: bool,
 ) -> Result<(), String> {
-    if !read_accounts(&app_handle)?.iter().any(|item| item.id == account_id) {
+    if !read_accounts(&app_handle)?
+        .iter()
+        .any(|item| item.id == account_id)
+    {
         return Err("Google Drive account is not connected".to_string());
     }
     {
@@ -388,35 +390,55 @@ pub fn start_scan(
             return Ok(());
         }
     }
-    CANCELLED_SCANS.lock().unwrap_or_else(|item| item.into_inner()).remove(&account_id);
+    CANCELLED_SCANS
+        .lock()
+        .unwrap_or_else(|item| item.into_inner())
+        .remove(&account_id);
     tauri::async_runtime::spawn(async move {
         match scan_account(&app_handle, &account_id, force_full).await {
             Ok(path) => {
-                app_handle.emit_all(
-                    "googledrive_scan_completed",
-                    CompletedPayload {
-                        account_id: account_id.clone(),
-                        path: path.display().to_string(),
-                        errors_path: String::new(),
-                    },
-                ).ok();
+                app_handle
+                    .emit_all(
+                        "googledrive_scan_completed",
+                        CompletedPayload {
+                            account_id: account_id.clone(),
+                            path: path.display().to_string(),
+                            errors_path: String::new(),
+                        },
+                    )
+                    .ok();
             }
             Err(message) if message == SCAN_CANCELLED_MESSAGE => {}
             Err(message) => {
-                app_handle.emit_all(
-                    "googledrive_scan_failed",
-                    FailedPayload { account_id: account_id.clone(), message },
-                ).ok();
+                app_handle
+                    .emit_all(
+                        "googledrive_scan_failed",
+                        FailedPayload {
+                            account_id: account_id.clone(),
+                            message,
+                        },
+                    )
+                    .ok();
             }
         }
-        ACTIVE_SCANS.lock().unwrap_or_else(|item| item.into_inner()).remove(&account_id);
-        CANCELLED_SCANS.lock().unwrap_or_else(|item| item.into_inner()).remove(&account_id);
+        ACTIVE_SCANS
+            .lock()
+            .unwrap_or_else(|item| item.into_inner())
+            .remove(&account_id);
+        CANCELLED_SCANS
+            .lock()
+            .unwrap_or_else(|item| item.into_inner())
+            .remove(&account_id);
     });
     Ok(())
 }
 
 pub fn stop_scan(account_id: &str) {
-    if ACTIVE_SCANS.lock().unwrap_or_else(|item| item.into_inner()).contains(account_id) {
+    if ACTIVE_SCANS
+        .lock()
+        .unwrap_or_else(|item| item.into_inner())
+        .contains(account_id)
+    {
         CANCELLED_SCANS
             .lock()
             .unwrap_or_else(|item| item.into_inner())
@@ -441,7 +463,9 @@ async fn scan_account(
     let about = fetch_about(&http, &access_token).await?;
     upsert_account(app_handle, account_from_about(&about))?;
     let path = cache_path(app_handle, account_id)?;
-    let existing = (!force_full).then(|| read_cache(&path, account_id)).flatten();
+    let existing = (!force_full)
+        .then(|| read_cache(&path, account_id))
+        .flatten();
     let cache = match existing {
         Some(cache) => match incremental_scan(app_handle, &http, &access_token, cache).await {
             Ok(cache) => cache,
@@ -454,11 +478,16 @@ async fn scan_account(
     };
     ensure_scan_active(account_id)?;
     write_cache(&path, &cache)?;
-    app_handle.emit_all(
-        "googledrive_scan_finalizing",
-        AccountPayload { account_id: account_id.to_string() },
-    ).ok();
-    let account = read_accounts(app_handle)?.into_iter()
+    app_handle
+        .emit_all(
+            "googledrive_scan_finalizing",
+            AccountPayload {
+                account_id: account_id.to_string(),
+            },
+        )
+        .ok();
+    let account = read_accounts(app_handle)?
+        .into_iter()
         .find(|account| account.id == account_id)
         .ok_or_else(|| "Google Drive account metadata is missing".to_string())?;
     write_scan_result(&build_scan_json(&cache, &account)?)
@@ -470,15 +499,20 @@ async fn full_scan(
     access_token: &str,
     account_id: &str,
 ) -> Result<GoogleDriveCache, String> {
-    app_handle.emit_all(
-        "googledrive_scan_full",
-        AccountPayload { account_id: account_id.to_string() },
-    ).ok();
+    app_handle
+        .emit_all(
+            "googledrive_scan_full",
+            AccountPayload {
+                account_id: account_id.to_string(),
+            },
+        )
+        .ok();
     let root: DriveFile = google_get(
         http,
         access_token,
         &format!("{API_ROOT}/files/root?fields=id,name,mimeType"),
-    ).await?;
+    )
+    .await?;
     let root_id = root.id.clone();
     let mut items = HashMap::new();
     items.insert(root_id.clone(), cached_item(root));
@@ -487,13 +521,17 @@ async fn full_scan(
     let mut total = 0_u64;
     loop {
         ensure_scan_active(account_id)?;
-        let mut request = http.get(&format!("{API_ROOT}/files"))
+        let mut request = http
+            .get(&format!("{API_ROOT}/files"))
             .bearer_auth(access_token)
             .query(&[
                 ("spaces", "drive"),
                 ("pageSize", "1000"),
                 ("q", "trashed = false"),
-                ("fields", "nextPageToken,files(id,name,mimeType,size,quotaBytesUsed,parents,trashed)"),
+                (
+                    "fields",
+                    "nextPageToken,files(id,name,mimeType,size,quotaBytesUsed,parents,trashed)",
+                ),
             ]);
         if let Some(token) = &page_token {
             request = request.query(&[("pageToken", token)]);
@@ -512,13 +550,16 @@ async fn full_scan(
         }
         emit_status(app_handle, account_id, count, total);
         page_token = page.next_page_token;
-        if page_token.is_none() { break; }
+        if page_token.is_none() {
+            break;
+        }
     }
     let token: StartPageToken = google_get(
         http,
         access_token,
         &format!("{API_ROOT}/changes/startPageToken"),
-    ).await?;
+    )
+    .await?;
     Ok(GoogleDriveCache {
         version: CACHE_VERSION.to_string(),
         account_id: account_id.to_string(),
@@ -534,10 +575,14 @@ async fn incremental_scan(
     access_token: &str,
     mut cache: GoogleDriveCache,
 ) -> Result<GoogleDriveCache, String> {
-    app_handle.emit_all(
-        "googledrive_scan_incremental",
-        AccountPayload { account_id: cache.account_id.clone() },
-    ).ok();
+    app_handle
+        .emit_all(
+            "googledrive_scan_incremental",
+            AccountPayload {
+                account_id: cache.account_id.clone(),
+            },
+        )
+        .ok();
     let mut token = cache.page_token.clone();
     let mut count = 0_u64;
     let mut total = 0_u64;
@@ -587,29 +632,45 @@ fn cached_item(file: DriveFile) -> CachedItem {
         id: file.id,
         parent_id: file.parents.and_then(|items| items.into_iter().next()),
         name: file.name.unwrap_or_else(|| "(unnamed)".to_string()),
-        size: file.size.or(file.quota_bytes_used)
-            .and_then(|size| size.parse().ok()).unwrap_or_default(),
+        size: file
+            .size
+            .or(file.quota_bytes_used)
+            .and_then(|size| size.parse().ok())
+            .unwrap_or_default(),
         is_folder: file.mime_type.as_deref() == Some("application/vnd.google-apps.folder"),
     }
 }
 
-fn build_scan_json(cache: &GoogleDriveCache, account: &GoogleDriveAccount) -> Result<String, String> {
+fn build_scan_json(
+    cache: &GoogleDriveCache,
+    account: &GoogleDriveAccount,
+) -> Result<String, String> {
     let mut child_ids: HashMap<String, Vec<String>> = HashMap::new();
     for item in cache.items.values() {
-        if item.id == cache.root_id { continue; }
-        let parent = item.parent_id.as_ref()
+        if item.id == cache.root_id {
+            continue;
+        }
+        let parent = item
+            .parent_id
+            .as_ref()
             .filter(|parent| cache.items.contains_key(*parent))
             .cloned()
             .unwrap_or_else(|| cache.root_id.clone());
         child_ids.entry(parent).or_default().push(item.id.clone());
     }
     let mut visiting = HashSet::new();
-    let mut children = child_ids.get(&cache.root_id).cloned().unwrap_or_default()
+    let mut children = child_ids
+        .get(&cache.root_id)
+        .cloned()
+        .unwrap_or_default()
         .into_iter()
         .filter_map(|id| build_node(&id, cache, &child_ids, &mut visiting))
         .collect::<Vec<_>>();
     children.sort_by_key(|node| std::cmp::Reverse(node["size"].as_u64().unwrap_or_default()));
-    let size = children.iter().map(|node| node["size"].as_u64().unwrap_or_default()).sum::<u64>();
+    let size = children
+        .iter()
+        .map(|node| node["size"].as_u64().unwrap_or_default())
+        .sum::<u64>();
     serde_json::to_string(&json!({
         "schema-version": "duckdisk-cloud-v1",
         "unit": "bytes",
@@ -621,7 +682,8 @@ fn build_scan_json(cache: &GoogleDriveCache, account: &GoogleDriveAccount) -> Re
             "size": size,
             "children": children
         }
-    })).map_err(|err| err.to_string())
+    }))
+    .map_err(|err| err.to_string())
 }
 
 fn build_node(
@@ -630,18 +692,31 @@ fn build_node(
     child_ids: &HashMap<String, Vec<String>>,
     visiting: &mut HashSet<String>,
 ) -> Option<Value> {
-    if !visiting.insert(id.to_string()) { return None; }
+    if !visiting.insert(id.to_string()) {
+        return None;
+    }
     let item = cache.items.get(id)?;
     let mut children = if item.is_folder {
-        child_ids.get(id).cloned().unwrap_or_default().into_iter()
+        child_ids
+            .get(id)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
             .filter_map(|child| build_node(&child, cache, child_ids, visiting))
             .collect::<Vec<_>>()
-    } else { Vec::new() };
+    } else {
+        Vec::new()
+    };
     children.sort_by_key(|node| std::cmp::Reverse(node["size"].as_u64().unwrap_or_default()));
     visiting.remove(id);
     let size = if item.is_folder {
-        children.iter().map(|node| node["size"].as_u64().unwrap_or_default()).sum()
-    } else { item.size };
+        children
+            .iter()
+            .map(|node| node["size"].as_u64().unwrap_or_default())
+            .sum()
+    } else {
+        item.size
+    };
     Some(json!({
         "name": item.name,
         "cloudId": item.id,
@@ -659,11 +734,17 @@ async fn fetch_about(http: &Client, access_token: &str) -> Result<AboutResponse,
     ).await
 }
 
-async fn google_get<T: DeserializeOwned>(http: &Client, token: &str, url: &str) -> Result<T, String> {
+async fn google_get<T: DeserializeOwned>(
+    http: &Client,
+    token: &str,
+    url: &str,
+) -> Result<T, String> {
     google_response(http.get(url).bearer_auth(token).send().await).await
 }
 
-async fn google_response<T: DeserializeOwned>(response: Result<reqwest::Response, reqwest::Error>) -> Result<T, String> {
+async fn google_response<T: DeserializeOwned>(
+    response: Result<reqwest::Response, reqwest::Error>,
+) -> Result<T, String> {
     let response = response.map_err(|err| format!("Could not reach Google Drive: {err}"))?;
     let status = response.status();
     let body = response.text().await.map_err(|err| err.to_string())?;
@@ -673,11 +754,7 @@ async fn google_response<T: DeserializeOwned>(response: Result<reqwest::Response
     serde_json::from_str(&body).map_err(|err| format!("Invalid Google Drive response: {err}"))
 }
 
-async fn google_trash_item(
-    http: &Client,
-    access_token: &str,
-    item_id: &str,
-) -> Result<(), String> {
+async fn google_trash_item(http: &Client, access_token: &str, item_id: &str) -> Result<(), String> {
     let mut url = google_drive_item_url(item_id)?;
     url.query_pairs_mut()
         .append_pair("supportsAllDrives", "true")
@@ -717,8 +794,7 @@ async fn google_trash_item(
                 return Ok(());
             }
             return Err(
-                "Google Drive accepted the update but did not move the item to Trash"
-                    .to_string(),
+                "Google Drive accepted the update but did not move the item to Trash".to_string(),
             );
         }
         if is_retryable_delete_status(status) {
@@ -738,8 +814,7 @@ async fn google_trash_item(
         }
         let body = response.text().await.unwrap_or_default();
         let message = google_error_message(status, &body);
-        if status == StatusCode::FORBIDDEN
-            && message.to_ascii_lowercase().contains("insufficient")
+        if status == StatusCode::FORBIDDEN && message.to_ascii_lowercase().contains("insufficient")
         {
             return Err(
                 "Reconnect Google Drive from All Disks to grant permission to move items to Trash."
@@ -816,7 +891,8 @@ fn oauth_client(
         )
         .set_auth_type(AuthType::RequestBody);
     match redirect {
-        Some(uri) => Ok(client.set_redirect_uri(RedirectUrl::new(uri.to_string()).map_err(|err| err.to_string())?)),
+        Some(uri) => Ok(client
+            .set_redirect_uri(RedirectUrl::new(uri.to_string()).map_err(|err| err.to_string())?)),
         None => Ok(client),
     }
 }
@@ -828,27 +904,45 @@ fn oauth_http_client() -> Result<Client, String> {
         .map_err(|err| format!("Could not configure OAuth client: {err}"))
 }
 
-fn client_id() -> String { env!("DUCKDISK_GOOGLE_CLIENT_ID").trim().to_string() }
+fn client_id() -> String {
+    oauth_config::google_drive_client_id().trim().to_string()
+}
 
-fn client_secret() -> String { env!("DUCKDISK_GOOGLE_CLIENT_SECRET").trim().to_string() }
+fn client_secret() -> String {
+    env!("DUCKDISK_GOOGLE_CLIENT_SECRET").trim().to_string()
+}
 
 fn required_client_id() -> Result<String, String> {
     let value = client_id();
     if value.is_empty() {
-        Err("Google Drive is not configured in this build. Set DUCKDISK_GOOGLE_CLIENT_ID and rebuild.".to_string())
-    } else { Ok(value) }
+        Err("Google Drive is not configured in this build.".to_string())
+    } else {
+        Ok(value)
+    }
 }
 
 fn required_client_secret() -> Result<String, String> {
     let value = client_secret();
     if value.is_empty() {
-        Err("Google Drive is not configured in this build. Set DUCKDISK_GOOGLE_CLIENT_SECRET and rebuild.".to_string())
-    } else { Ok(value) }
+        Err("Google Drive is not configured in this build.".to_string())
+    } else {
+        Ok(value)
+    }
 }
 
 fn account_from_about(about: &AboutResponse) -> GoogleDriveAccount {
-    let total = about.storage_quota.limit.as_ref().and_then(|value| value.parse().ok()).unwrap_or_default();
-    let used = about.storage_quota.usage_in_drive.as_ref().and_then(|value| value.parse().ok()).unwrap_or_default();
+    let total = about
+        .storage_quota
+        .limit
+        .as_ref()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_default();
+    let used = about
+        .storage_quota
+        .usage_in_drive
+        .as_ref()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_default();
     GoogleDriveAccount {
         id: about.user.permission_id.clone(),
         name: about.user.display_name.clone(),
@@ -861,59 +955,97 @@ fn account_from_about(about: &AboutResponse) -> GoogleDriveAccount {
 
 fn store_credential(account_id: &str, refresh_token: &str) -> Result<(), String> {
     let entry = keyring::Entry::new(KEYCHAIN_SERVICE, account_id).map_err(|err| err.to_string())?;
-    let value = serde_json::to_string(&StoredCredential { refresh_token: refresh_token.to_string() }).map_err(|err| err.to_string())?;
+    let value = serde_json::to_string(&StoredCredential {
+        refresh_token: refresh_token.to_string(),
+    })
+    .map_err(|err| err.to_string())?;
     entry.set_password(&value).map_err(|err| err.to_string())
 }
 
 fn read_credential(account_id: &str) -> Result<StoredCredential, String> {
     let entry = keyring::Entry::new(KEYCHAIN_SERVICE, account_id).map_err(|err| err.to_string())?;
-    let value = entry.get_password().map_err(|err| format!("Google sign-in is missing from Keychain: {err}"))?;
+    let value = entry
+        .get_password()
+        .map_err(|err| format!("Google sign-in is missing from Keychain: {err}"))?;
     serde_json::from_str(&value).map_err(|err| err.to_string())
 }
 
 fn accounts_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    app_handle.path_resolver().app_config_dir()
+    app_handle
+        .path_resolver()
+        .app_config_dir()
         .map(|path| path.join("google-drive-accounts.json"))
         .ok_or_else(|| "Could not resolve DuckDisk configuration directory".to_string())
 }
 
 fn read_accounts(app_handle: &tauri::AppHandle) -> Result<Vec<GoogleDriveAccount>, String> {
     let path = accounts_path(app_handle)?;
-    if !path.exists() { return Ok(Vec::new()); }
-    serde_json::from_str(&fs::read_to_string(path).map_err(|err| err.to_string())?).map_err(|err| err.to_string())
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    serde_json::from_str(&fs::read_to_string(path).map_err(|err| err.to_string())?)
+        .map_err(|err| err.to_string())
 }
 
-fn write_accounts(app_handle: &tauri::AppHandle, accounts: &[GoogleDriveAccount]) -> Result<(), String> {
+fn write_accounts(
+    app_handle: &tauri::AppHandle,
+    accounts: &[GoogleDriveAccount],
+) -> Result<(), String> {
     let path = accounts_path(app_handle)?;
-    if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|err| err.to_string())?; }
-    fs::write(path, serde_json::to_string_pretty(accounts).map_err(|err| err.to_string())?).map_err(|err| err.to_string())
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+    fs::write(
+        path,
+        serde_json::to_string_pretty(accounts).map_err(|err| err.to_string())?,
+    )
+    .map_err(|err| err.to_string())
 }
 
-fn upsert_account(app_handle: &tauri::AppHandle, account: GoogleDriveAccount) -> Result<(), String> {
+fn upsert_account(
+    app_handle: &tauri::AppHandle,
+    account: GoogleDriveAccount,
+) -> Result<(), String> {
     let mut accounts = read_accounts(app_handle)?;
     if let Some(existing) = accounts.iter_mut().find(|item| item.id == account.id) {
         *existing = account;
-    } else { accounts.push(account); }
+    } else {
+        accounts.push(account);
+    }
     write_accounts(app_handle, &accounts)
 }
 
 fn cache_path(app_handle: &tauri::AppHandle, account_id: &str) -> Result<PathBuf, String> {
     let mut hasher = DefaultHasher::new();
     account_id.hash(&mut hasher);
-    app_handle.path_resolver().app_cache_dir()
-        .map(|path| path.join("google-drive").join(format!("{:016x}.json", hasher.finish())))
+    app_handle
+        .path_resolver()
+        .app_cache_dir()
+        .map(|path| {
+            path.join("google-drive")
+                .join(format!("{:016x}.json", hasher.finish()))
+        })
         .ok_or_else(|| "Could not resolve DuckDisk cache directory".to_string())
 }
 
 fn read_cache(path: &Path, account_id: &str) -> Option<GoogleDriveCache> {
     let cache: GoogleDriveCache = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
-    (cache.version == CACHE_VERSION && cache.account_id == account_id && !cache.page_token.is_empty()).then_some(cache)
+    (cache.version == CACHE_VERSION
+        && cache.account_id == account_id
+        && !cache.page_token.is_empty())
+    .then_some(cache)
 }
 
 fn write_cache(path: &Path, cache: &GoogleDriveCache) -> Result<(), String> {
-    if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|err| err.to_string())?; }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
     let temporary = path.with_extension("json.tmp");
-    fs::write(&temporary, serde_json::to_string(cache).map_err(|err| err.to_string())?).map_err(|err| err.to_string())?;
+    fs::write(
+        &temporary,
+        serde_json::to_string(cache).map_err(|err| err.to_string())?,
+    )
+    .map_err(|err| err.to_string())?;
     fs::rename(temporary, path).map_err(|err| err.to_string())
 }
 
@@ -939,17 +1071,33 @@ fn remove_cached_subtree(cache: &mut GoogleDriveCache, root_id: &str) {
 }
 
 fn write_scan_result(content: &str) -> Result<PathBuf, String> {
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
-    let path = std::env::temp_dir().join(format!("duckdisk-google-drive-scan-{}-{stamp}.json", std::process::id()));
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let path = std::env::temp_dir().join(format!(
+        "duckdisk-google-drive-scan-{}-{stamp}.json",
+        std::process::id()
+    ));
     fs::write(&path, content).map_err(|err| err.to_string())?;
     Ok(path)
 }
 
 fn emit_status(app_handle: &tauri::AppHandle, account_id: &str, items: u64, total: u64) {
-    app_handle.emit_all("googledrive_scan_status", ScanStatusPayload {
-        account_id: account_id.to_string(), items, total,
-        operation_not_permitted: 0, permission_denied: 0, interrupted: 0, other: 0,
-    }).ok();
+    app_handle
+        .emit_all(
+            "googledrive_scan_status",
+            ScanStatusPayload {
+                account_id: account_id.to_string(),
+                items,
+                total,
+                operation_not_permitted: 0,
+                permission_denied: 0,
+                interrupted: 0,
+                other: 0,
+            },
+        )
+        .ok();
 }
 
 fn ensure_scan_active(account_id: &str) -> Result<(), String> {
@@ -965,7 +1113,9 @@ fn ensure_scan_active(account_id: &str) -> Result<(), String> {
 }
 
 fn wait_for_oauth_callback(listener: TcpListener, expected_state: &str) -> Result<String, String> {
-    listener.set_nonblocking(true).map_err(|err| err.to_string())?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|err| err.to_string())?;
     let started = Instant::now();
     while started.elapsed() < CALLBACK_TIMEOUT {
         if OAUTH_CANCELLED.load(Ordering::SeqCst) {
@@ -976,8 +1126,12 @@ fn wait_for_oauth_callback(listener: TcpListener, expected_state: &str) -> Resul
                 let mut buffer = [0_u8; 8192];
                 let count = stream.read(&mut buffer).map_err(|err| err.to_string())?;
                 let request = String::from_utf8_lossy(&buffer[..count]);
-                let target = request.split_whitespace().nth(1).ok_or_else(|| "Invalid Google callback".to_string())?;
-                let url = Url::parse(&format!("http://127.0.0.1{target}")).map_err(|err| err.to_string())?;
+                let target = request
+                    .split_whitespace()
+                    .nth(1)
+                    .ok_or_else(|| "Invalid Google callback".to_string())?;
+                let url = Url::parse(&format!("http://127.0.0.1{target}"))
+                    .map_err(|err| err.to_string())?;
                 let params = url.query_pairs().into_owned().collect::<HashMap<_, _>>();
                 if params.get("state").map(String::as_str) != Some(expected_state) {
                     return Err("Google sign-in state did not match".to_string());
@@ -990,11 +1144,16 @@ fn wait_for_oauth_callback(listener: TcpListener, expected_state: &str) -> Resul
                     write_callback_response(&mut stream, "Google Drive connection failed")?;
                     return Err(message);
                 }
-                let code = params.get("code").cloned().ok_or_else(|| "Google callback did not include a code".to_string())?;
+                let code = params
+                    .get("code")
+                    .cloned()
+                    .ok_or_else(|| "Google callback did not include a code".to_string())?;
                 write_callback_response(&mut stream, "Google Drive connected")?;
                 return Ok(code);
             }
-            Err(err) if err.kind() == ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(100)),
+            Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(100))
+            }
             Err(err) => return Err(err.to_string()),
         }
     }
@@ -1032,7 +1191,9 @@ fn is_user_cap_error(details: &str) -> bool {
 fn write_callback_response(stream: &mut std::net::TcpStream, title: &str) -> Result<(), String> {
     let body = format!("<!doctype html><meta charset=\"utf-8\"><title>{title}</title><style>body{{font:16px system-ui;background:#15181c;color:#eef1f3;display:grid;place-items:center;height:100vh;margin:0}}</style><h1>{title}</h1>");
     let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
-    stream.write_all(response.as_bytes()).map_err(|err| err.to_string())
+    stream
+        .write_all(response.as_bytes())
+        .map_err(|err| err.to_string())
 }
 
 #[cfg(test)]
@@ -1053,9 +1214,18 @@ mod tests {
     fn builds_google_drive_tree_and_attaches_orphans() {
         let mut items = HashMap::new();
         items.insert("root".to_string(), item("root", None, "My Drive", 0, true));
-        items.insert("folder".to_string(), item("folder", Some("root"), "Work", 0, true));
-        items.insert("file".to_string(), item("file", Some("folder"), "notes.txt", 42, false));
-        items.insert("orphan".to_string(), item("orphan", Some("missing"), "shared.pdf", 8, false));
+        items.insert(
+            "folder".to_string(),
+            item("folder", Some("root"), "Work", 0, true),
+        );
+        items.insert(
+            "file".to_string(),
+            item("file", Some("folder"), "notes.txt", 42, false),
+        );
+        items.insert(
+            "orphan".to_string(),
+            item("orphan", Some("missing"), "shared.pdf", 8, false),
+        );
         let cache = GoogleDriveCache {
             version: CACHE_VERSION.to_string(),
             account_id: "account".to_string(),
@@ -1071,7 +1241,8 @@ mod tests {
             used_space: 50,
             available_space: 50,
         };
-        let result: Value = serde_json::from_str(&build_scan_json(&cache, &account).unwrap()).unwrap();
+        let result: Value =
+            serde_json::from_str(&build_scan_json(&cache, &account).unwrap()).unwrap();
         assert_eq!(result["tree"]["size"], 50);
         assert_eq!(result["tree"]["children"].as_array().unwrap().len(), 2);
     }
@@ -1080,10 +1251,22 @@ mod tests {
     fn removes_google_drive_cached_subtree() {
         let mut items = HashMap::new();
         items.insert("root".to_string(), item("root", None, "My Drive", 0, true));
-        items.insert("folder".to_string(), item("folder", Some("root"), "Work", 0, true));
-        items.insert("nested".to_string(), item("nested", Some("folder"), "Drafts", 0, true));
-        items.insert("file".to_string(), item("file", Some("nested"), "notes.txt", 42, false));
-        items.insert("keep".to_string(), item("keep", Some("root"), "keep.pdf", 8, false));
+        items.insert(
+            "folder".to_string(),
+            item("folder", Some("root"), "Work", 0, true),
+        );
+        items.insert(
+            "nested".to_string(),
+            item("nested", Some("folder"), "Drafts", 0, true),
+        );
+        items.insert(
+            "file".to_string(),
+            item("file", Some("nested"), "notes.txt", 42, false),
+        );
+        items.insert(
+            "keep".to_string(),
+            item("keep", Some("root"), "keep.pdf", 8, false),
+        );
         let mut cache = GoogleDriveCache {
             version: CACHE_VERSION.to_string(),
             account_id: "account".to_string(),
@@ -1120,6 +1303,9 @@ mod tests {
     fn builds_google_drive_item_url_without_an_empty_path_segment() {
         let url = google_drive_item_url("file-id").unwrap();
 
-        assert_eq!(url.as_str(), "https://www.googleapis.com/drive/v3/files/file-id");
+        assert_eq!(
+            url.as_str(),
+            "https://www.googleapis.com/drive/v3/files/file-id"
+        );
     }
 }

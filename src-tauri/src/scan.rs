@@ -12,8 +12,8 @@ use std::sync::Mutex;
 use tauri::api::process::{Command as TauriCommand, CommandEvent};
 use tauri::Manager;
 
-use crate::MyState;
 use crate::temp_files::validate_result_file;
+use crate::MyState;
 
 static ACTIVE_INCREMENTAL_SCANS: Lazy<Mutex<HashSet<String>>> =
     Lazy::new(|| Mutex::new(HashSet::new()));
