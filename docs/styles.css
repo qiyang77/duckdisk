@@ -209,7 +209,7 @@ a {
 }
 
 .hero-backdrop {
-  background-image: url("screenshots/scan-results.png?v=0.5.7-2");
+  background-image: url("screenshots/scan-results.png?v=0.5.8-2");
   background-position: center bottom;
   background-repeat: no-repeat;
   background-size: cover;
@@ -290,6 +290,26 @@ h3 {
   font-size: 13px;
   font-weight: 600;
   margin: 16px 0 0;
+}
+
+.release-highlight {
+  border-left: 2px solid var(--duck);
+  color: var(--paper-muted);
+  font-size: 15px;
+  line-height: 1.6;
+  margin: 22px 0 0;
+  padding-left: 14px;
+}
+
+.release-highlight strong {
+  color: var(--duck);
+  margin-right: 8px;
+}
+
+.release-highlight a {
+  color: var(--paper);
+  font-weight: 700;
+  margin-left: 5px;
 }
 
 .hero-scroll {

@@ -24,6 +24,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
@@ -113,8 +115,19 @@ jobs:
           fi
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             release_notes_file="$(mktemp)"
+            generated_notes_file="$(mktemp)"
+            previous_tag="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+            if [[ -n "$previous_tag" ]]; then
+              git log --format='- %s (`%h`)' \
+                "$previous_tag..$GITHUB_REF_NAME" > "$generated_notes_file"
+            else
+              git log --format='- %s (`%h`)' \
+                --max-count=20 "$GITHUB_REF_NAME" > "$generated_notes_file"
+            fi
             {
-              echo "DuckDisk macOS arm64 build."
+              echo "## What's New in ${GITHUB_REF_NAME#v}"
+              echo
+              cat "$generated_notes_file"
               echo
               cat "$install_notes_file"
             } > "$release_notes_file"
