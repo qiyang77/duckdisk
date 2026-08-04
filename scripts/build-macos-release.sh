@@ -9,11 +9,14 @@ export APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-Developer ID Applicatio
 
 version="$(node -p "require('./package.json').version")"
 arch="$(uname -m)"
+skip_notarization="${SKIP_NOTARIZATION:-0}"
 if [[ "$arch" == "aarch64" ]]; then
   arch="arm64"
 fi
 
-if [[ -n "${APPLE_NOTARY_PROFILE:-}" ]]; then
+if [[ "$skip_notarization" == "1" ]]; then
+  notary_args=()
+elif [[ -n "${APPLE_NOTARY_PROFILE:-}" ]]; then
   notary_args=(--keychain-profile "$APPLE_NOTARY_PROFILE")
 elif [[ -n "${APPLE_ID:-}" && -n "${APPLE_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]; then
   notary_args=(
@@ -53,13 +56,17 @@ codesign --force --deep --options runtime --timestamp \
 codesign --verify --deep --strict --verbose=2 "$clean_app"
 codesign -d --verbose=4 "$clean_app" 2>&1 | grep -q 'flags=.*runtime'
 
-echo "Notarizing DuckDisk.app..."
-app_zip="$work_dir/DuckDisk.zip"
-ditto -c -k --keepParent "$clean_app" "$app_zip"
-xcrun notarytool submit "$app_zip" "${notary_args[@]}" --wait
-xcrun stapler staple "$clean_app"
-xcrun stapler validate "$clean_app"
-spctl --assess --type execute --verbose=4 "$clean_app"
+if [[ "$skip_notarization" == "1" ]]; then
+  echo "Skipping DuckDisk.app notarization by request."
+else
+  echo "Notarizing DuckDisk.app..."
+  app_zip="$work_dir/DuckDisk.zip"
+  ditto -c -k --keepParent "$clean_app" "$app_zip"
+  xcrun notarytool submit "$app_zip" "${notary_args[@]}" --wait
+  xcrun stapler staple "$clean_app"
+  xcrun stapler validate "$clean_app"
+  spctl --assess --type execute --verbose=4 "$clean_app"
+fi
 
 echo "Creating signed DMG..."
 image_size_mb="$(( $(du -sm "$clean_app" | awk '{print $1}') + 24 ))"
@@ -80,12 +87,19 @@ compressed_dmg="$work_dir/DuckDisk_${version}_${arch}.dmg"
 hdiutil convert "$rw_dmg" -format UDZO -imagekey zlib-level=9 -o "$compressed_dmg" >/dev/null
 codesign --force --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$compressed_dmg"
 
-echo "Notarizing DMG..."
-xcrun notarytool submit "$compressed_dmg" "${notary_args[@]}" --wait
-xcrun stapler staple "$compressed_dmg"
-xcrun stapler validate "$compressed_dmg"
+if [[ "$skip_notarization" == "1" ]]; then
+  echo "Skipping DMG notarization by request."
+else
+  echo "Notarizing DMG..."
+  xcrun notarytool submit "$compressed_dmg" "${notary_args[@]}" --wait
+  xcrun stapler staple "$compressed_dmg"
+  xcrun stapler validate "$compressed_dmg"
+fi
 hdiutil verify "$compressed_dmg"
-spctl --assess --type open --context context:primary-signature --verbose=4 "$compressed_dmg"
+codesign --verify --verbose=2 "$compressed_dmg"
+if [[ "$skip_notarization" != "1" ]]; then
+  spctl --assess --type open --context context:primary-signature --verbose=4 "$compressed_dmg"
+fi
 
 dmg_dir="src-tauri/target/release/bundle/dmg"
 mkdir -p "$dmg_dir"

@@ -5,6 +5,12 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      skip_notarization:
+        description: "Build a signed release without Apple notarization"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -12,6 +18,8 @@ permissions:
 jobs:
   release:
     runs-on: macos-latest
+    env:
+      SKIP_NOTARIZATION: ${{ inputs.skip_notarization && '1' || '0' }}
 
     steps:
       - name: Checkout repository
@@ -66,7 +74,7 @@ jobs:
           rm -f "$certificate_path"
           echo "DUCKDISK_SIGNING_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
 
-      - name: Build, sign, and notarize DMG
+      - name: Build and sign DMG
         env:
           DUCKDISK_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_DRIVE_CLIENT_SECRET }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -93,8 +101,16 @@ jobs:
           cat > "$install_notes_file" <<'NOTES'
           Installation: Download the .dmg, open it, and drag DuckDisk into Applications.
 
-          DuckDisk is signed with a Developer ID certificate and notarized by Apple.
+          DuckDisk is signed with a Developer ID certificate.
           NOTES
+          if [[ "${SKIP_NOTARIZATION:-0}" == "1" ]]; then
+            cat >> "$install_notes_file" <<'NOTES'
+
+          This release has not been notarized by Apple. On first launch, macOS may require right-clicking the app and choosing Open. If that does not work, run: `xattr -dr com.apple.quarantine /Applications/DuckDisk.app`
+          NOTES
+          else
+            echo "This release is notarized by Apple." >> "$install_notes_file"
+          fi
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             release_notes_file="$(mktemp)"
             {
