@@ -684,7 +684,9 @@ async fn google_trash_item(
     url.path_segments_mut()
         .map_err(|_| "Could not build Google Drive item URL".to_string())?
         .push(item_id);
-    url.query_pairs_mut().append_pair("supportsAllDrives", "true");
+    url.query_pairs_mut()
+        .append_pair("supportsAllDrives", "true")
+        .append_pair("fields", "id,trashed");
 
     let mut attempts = 0_u32;
     loop {
@@ -708,8 +710,21 @@ async fn google_trash_item(
             }
         };
         let status = response.status();
-        if status.is_success() || status == StatusCode::NOT_FOUND {
-            return Ok(());
+        if status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            let updated_file: Value = serde_json::from_str(&body)
+                .map_err(|err| format!("Invalid Google Drive update response: {err}"))?;
+            if updated_file
+                .get("trashed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                return Ok(());
+            }
+            return Err(
+                "Google Drive accepted the update but did not move the item to Trash"
+                    .to_string(),
+            );
         }
         if is_retryable_delete_status(status) {
             attempts += 1;
