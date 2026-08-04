@@ -24,6 +24,7 @@ use tauri::Manager;
 use url::Url;
 
 const API_ROOT: &str = "https://www.googleapis.com/drive/v3";
+const DRIVE_SCOPE: &str = "https://www.googleapis.com/auth/drive";
 const KEYCHAIN_SERVICE: &str = "com.duckdisk.dev.googledrive";
 const CACHE_VERSION: &str = "duckdisk-google-drive-cache-v1";
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(120);
@@ -215,9 +216,7 @@ pub async fn connect_account(app_handle: &tauri::AppHandle) -> Result<GoogleDriv
     let (authorize_url, csrf_token) = oauth_client
         .authorize_url(CsrfToken::new_random)
         .set_pkce_challenge(pkce_challenge)
-        .add_scope(Scope::new(
-            "https://www.googleapis.com/auth/drive.metadata".to_string(),
-        ))
+        .add_scope(Scope::new(DRIVE_SCOPE.to_string()))
         .add_extra_param("access_type", "offline")
         .add_extra_param("prompt", "consent select_account")
         .url();

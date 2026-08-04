@@ -51,7 +51,7 @@ If macOS prompts for permissions during a scan, denied or previously blocked rea
 
 OneDrive scans use Microsoft account authorization and request `Files.ReadWrite` so selected files and folders can be moved to the OneDrive Recycle Bin. DuckDisk does not permanently delete cloud items. Refresh tokens are stored in macOS Keychain; cached scan metadata is stored in DuckDisk's application cache.
 
-Google Drive scans request the `drive.metadata` scope so DuckDisk can read metadata and move user-selected items to Google Drive Trash. File contents are not downloaded. Tokens are stored in macOS Keychain, and the app can revoke Google authorization and remove its local account cache. SSH scans use the system `ssh` command with either existing SSH keys/configuration or a password stored in macOS Keychain. DuckDisk can permanently delete user-selected SSH files within the configured remote path only after an additional confirmation.
+Google Drive scans request the full `drive` scope because Google does not allow narrower metadata permissions to move arbitrary existing user-selected items to Trash. DuckDisk uses this permission only to read file metadata and perform Trash actions the user explicitly starts; file contents are not downloaded for analysis. Tokens are stored in macOS Keychain, and the app can revoke Google authorization and remove its local account cache. SSH scans use the system `ssh` command with either existing SSH keys/configuration or a password stored in macOS Keychain. DuckDisk can permanently delete user-selected SSH files within the configured remote path only after an additional confirmation.
 
 See the [Privacy Policy](https://duckdisk.com/privacy.html) and [Terms of Use](https://duckdisk.com/terms.html).
 

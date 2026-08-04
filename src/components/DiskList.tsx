@@ -887,6 +887,11 @@ const DiskList = () => {
                 It does not download cloud file contents for analysis.
               </p>
               <p>
+                Google Drive requires its full Drive permission to move any existing
+                user-selected file or folder to Trash. DuckDisk uses that permission
+                only for metadata scanning and the Trash actions you explicitly start.
+              </p>
+              <p>
                 Sign-in tokens are stored in macOS Keychain and scan metadata is
                 cached only on this Mac. DuckDisk does not operate an account-data server.
               </p>
