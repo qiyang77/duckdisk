@@ -25,6 +25,6 @@ faqItems.forEach((item) => {
 document.querySelectorAll("[data-download]").forEach((link) => {
   link.setAttribute(
     "aria-label",
-    "Download DuckDisk v0.5.8 for Apple Silicon macOS"
+    "Download DuckDisk v0.5.9 for Apple Silicon macOS"
   );
 });

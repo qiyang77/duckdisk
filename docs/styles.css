@@ -209,7 +209,7 @@ a {
 }
 
 .hero-backdrop {
-  background-image: url("screenshots/scan-results.png?v=0.5.8-2");
+  background-image: url("screenshots/scan-results.png?v=0.5.9");
   background-position: center bottom;
   background-repeat: no-repeat;
   background-size: cover;

@@ -13,13 +13,11 @@ The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
 Website: https://duckdisk.com/
 
-## What's New in v0.5.8
+## What's New in v0.5.9
 
-- Faster return to the All Disks screen with cached SSH storage usage.
-- Clearer local, cloud, and SSH deletion progress with concrete failure reasons.
-- More reliable Google Drive move-to-Trash handling and item URLs.
-- Tighter filesystem, temporary-file, and SSH safety boundaries.
-- Updated maintained dependencies with legacy UI code and unused assets removed.
+- Apple-notarized and stapled distribution for smoother installation and first launch.
+- Developer ID signing and Hardened Runtime verification for the app and DMG.
+- Includes the local, OneDrive, Google Drive, and SSH improvements from v0.5.8.
 
 ## Screenshots
 
@@ -65,13 +63,8 @@ See the [Privacy Policy](https://duckdisk.com/privacy.html) and [Terms of Use](h
 
 Download the `.dmg`, open it, and drag DuckDisk into Applications.
 
-Release builds are signed with a Developer ID certificate. Version 0.5.8 is not
-Apple-notarized, so macOS may require right-clicking the app and choosing `Open`
-on first launch. If macOS still blocks the app, run:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/DuckDisk.app
-```
+Release builds are signed with a Developer ID certificate and notarized by
+Apple. macOS can verify the downloaded app before its first launch.
 
 Local development builds may use ad-hoc signing.
 
