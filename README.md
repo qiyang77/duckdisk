@@ -15,9 +15,7 @@ Website: https://duckdisk.com/
 
 ## What's New in v0.5.9
 
-- Apple-notarized and stapled distribution for smoother installation and first launch.
-- Developer ID signing and Hardened Runtime verification for the app and DMG.
-- Includes the local, OneDrive, Google Drive, and SSH improvements from v0.5.8.
+- Added Apple notarization.
 
 ## Screenshots
 
