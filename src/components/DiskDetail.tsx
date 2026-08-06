@@ -33,6 +33,8 @@ import {
   X,
 } from "lucide-react";
 
+const isMacAppStore = import.meta.env.VITE_DISTRIBUTION === "mas";
+
 type ScanStatus = {
   items: number;
   total: number;
@@ -537,7 +539,9 @@ const Scanning = () => {
     accountId = "",
   } = routeState || {};
   const isOneDrive = source === "onedrive";
-  const isGoogleDrive = source === "googledrive";
+  const isGoogleDrive =
+    import.meta.env.VITE_GOOGLE_DRIVE_ENABLED !== "false" &&
+    source === "googledrive";
   const isSsh = source === "ssh";
   const isCloud = source !== "local";
   const requiresKeychainApproval = isOneDrive || isGoogleDrive;
@@ -2200,15 +2204,16 @@ const Scanning = () => {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {(hasPermissionIssues(scanIssueReport.counts) || loadedFromCache) && (
-                  <button
-                    onClick={() => invoke("open_full_disk_access_settings")}
-                    className="button button-secondary"
-                  >
-                    <ShieldCheck size={14} />
-                    Grant Full Disk Access
-                  </button>
-                )}
+                {!isMacAppStore &&
+                  (hasPermissionIssues(scanIssueReport.counts) || loadedFromCache) && (
+                    <button
+                      onClick={() => invoke("open_full_disk_access_settings")}
+                      className="button button-secondary"
+                    >
+                      <ShieldCheck size={14} />
+                      Grant Full Disk Access
+                    </button>
+                  )}
                 <button
                   onClick={() => setShowScanIssues(false)}
                   className="icon-button"

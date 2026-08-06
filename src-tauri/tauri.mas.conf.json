@@ -1,0 +1,41 @@
+{
+  "build": {
+    "beforeBuildCommand": "VITE_DISTRIBUTION=mas VITE_GOOGLE_DRIVE_ENABLED=false npm run build"
+  },
+  "tauri": {
+    "allowlist": {
+      "dialog": {
+        "ask": true,
+        "open": true
+      }
+    },
+    "bundle": {
+      "category": "Utility",
+      "identifier": "com.duckdisk.app",
+      "macOS": {
+        "entitlements": "entitlements.mas.plist",
+        "signingIdentity": null
+      },
+      "targets": [
+        "app"
+      ]
+    },
+    "macOSPrivateApi": false,
+    "windows": [
+      {
+        "fullscreen": false,
+        "height": 760,
+        "minHeight": 620,
+        "minWidth": 900,
+        "resizable": true,
+        "title": "DuckDisk",
+        "width": 1200,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "transparent": false,
+        "center": true
+      }
+    ]
+  }
+}

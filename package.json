@@ -13,8 +13,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri",
-    "release:macos": "bash scripts/build-macos-release.sh"
+    "tauri": "bash scripts/tauri.sh",
+    "release:macos": "bash scripts/build-macos-release.sh",
+    "release:macos-store": "bash scripts/build-macos-store.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^1.6.0",

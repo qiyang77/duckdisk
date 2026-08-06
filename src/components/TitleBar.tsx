@@ -1,41 +1,7 @@
 import Logo from "../assets/duck.png";
 import { Link, useLocation } from "../router";
 import { appWindow } from "@tauri-apps/api/window";
-import { ChevronRight, Maximize2, Minus, X } from "lucide-react";
-
-const WindowControls = () => {
-  return (
-    <div className="window-controls" aria-label="Window controls">
-      <button
-        type="button"
-        className="window-control window-control-close"
-        title="Close"
-        aria-label="Close DuckDisk"
-        onClick={() => appWindow.close()}
-      >
-        <X size={8} strokeWidth={2.4} />
-      </button>
-      <button
-        type="button"
-        className="window-control window-control-minimize"
-        title="Minimize"
-        aria-label="Minimize DuckDisk"
-        onClick={() => appWindow.minimize()}
-      >
-        <Minus size={8} strokeWidth={2.4} />
-      </button>
-      <button
-        type="button"
-        className="window-control window-control-zoom"
-        title="Zoom"
-        aria-label="Zoom DuckDisk"
-        onClick={() => appWindow.toggleMaximize()}
-      >
-        <Maximize2 size={7} strokeWidth={2.4} />
-      </button>
-    </div>
-  );
-};
+import { ChevronRight } from "lucide-react";
 
 const TitleBar = () => {
   let { state, pathname } = useLocation() as any;
@@ -49,7 +15,7 @@ const TitleBar = () => {
         }
       }}
     >
-      <WindowControls />
+      <div aria-hidden="true" />
       <nav className="navi titlebar-breadcrumbs" aria-label="Breadcrumb">
         <ol className="flex min-w-0 items-center">
           <li className="inline-flex min-w-0 items-center">

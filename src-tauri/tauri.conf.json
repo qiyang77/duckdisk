@@ -14,6 +14,7 @@
       "all": false,
       "dialog": {
         "all": false,
+        "ask": true,
         "open": true
       },
       "shell": {
@@ -49,7 +50,6 @@
       "longDescription": "",
       "macOS": {
         "entitlements": null,
-        "exceptionDomain": "",
         "frameworks": [],
         "providerShortName": null,
         "signingIdentity": "-"
@@ -70,7 +70,7 @@
       "dialog": false,
       "pubkey": ""
     },
-    "macOSPrivateApi": true,
+    "macOSPrivateApi": false,
     "windows": [
       {
         "fullscreen": false,
@@ -80,8 +80,10 @@
         "resizable": true,
         "title": "DuckDisk",
         "width": 1200,
-        "decorations": false,
-        "transparent": true,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "transparent": false,
         "center": true
       }
     ]

@@ -4,7 +4,7 @@ import DiskItem from "./DiskItem";
 import { invoke } from "@tauri-apps/api/tauri";
 
 import { getVersion } from "@tauri-apps/api/app";
-import { open } from "@tauri-apps/api/dialog";
+import { confirm as confirmDialog, open } from "@tauri-apps/api/dialog";
 import { open as openExternal } from "@tauri-apps/api/shell";
 import folderIcon from "../assets/folder.png";
 import oneDriveIcon from "../assets/onedrive.svg";
@@ -64,6 +64,8 @@ type SshConnection = {
   port: number;
   path: string;
   authMethod: "key" | "password";
+  trustedHostKey?: string;
+  hasPrivateKey?: boolean;
   storageUsage?: SshStorageUsage | null;
 };
 
@@ -76,7 +78,13 @@ type SshStorageUsage = {
 type SshDraft = Omit<SshConnection, "id"> & {
   id?: string;
   password: string;
+  privateKeyPath: string;
+  keyPassphrase: string;
 };
+
+const isMacAppStore = import.meta.env.VITE_DISTRIBUTION === "mas";
+const googleDriveEnabled =
+  import.meta.env.VITE_GOOGLE_DRIVE_ENABLED !== "false";
 
 const emptySshDraft: SshDraft = {
   name: "",
@@ -85,6 +93,9 @@ const emptySshDraft: SshDraft = {
   path: "/",
   authMethod: "key" as "key" | "password",
   password: "",
+  privateKeyPath: "",
+  keyPassphrase: "",
+  trustedHostKey: "",
 };
 
 type UpdateCheck = {
@@ -203,9 +214,9 @@ const DiskList = () => {
   };
 
   useEffect(() => {
-    Promise.all([syncOneDrive(), syncGoogleDrive(), syncSshConnections()]).catch(
-      (error) => setCloudError(String(error))
-    );
+    const syncTasks = [syncOneDrive(), syncSshConnections()];
+    if (googleDriveEnabled) syncTasks.push(syncGoogleDrive());
+    Promise.all(syncTasks).catch((error) => setCloudError(String(error)));
   }, []);
 
   const connectOneDrive = async () => {
@@ -291,7 +302,25 @@ const DiskList = () => {
     setCloudBusy("ssh-save");
     setCloudError(null);
     try {
-      await invoke("save_ssh_connection", { connection: sshDraft });
+      let connection = sshDraft;
+      if (isMacAppStore) {
+        const fingerprint = await invoke<string>("inspect_ssh_host_key", {
+          host: sshDraft.host,
+          port: sshDraft.port,
+        });
+        if (fingerprint !== sshDraft.trustedHostKey) {
+          const trusted = await confirmDialog(
+            `Confirm that this is the SSH host key shown by your server administrator:\n\n${fingerprint}`,
+            {
+              title: "Trust SSH Server?",
+              type: "warning",
+            }
+          );
+          if (!trusted) return;
+        }
+        connection = { ...sshDraft, trustedHostKey: fingerprint };
+      }
+      await invoke("save_ssh_connection", { connection });
       await syncSshConnections();
       setShowSshDialog(false);
       setEditingSshConnection(null);
@@ -314,10 +343,22 @@ const DiskList = () => {
 
   const openSshConnectionSettings = (connection: SshConnection) => {
     setEditingSshConnection(connection);
-    setSshDraft({ ...connection, password: "" });
+    setSshDraft({
+      ...connection,
+      password: "",
+      privateKeyPath: "",
+      keyPassphrase: "",
+    });
     setShowSshPassword(false);
     setCloudError(null);
     setShowSshDialog(true);
+  };
+
+  const chooseSshPrivateKey = async () => {
+    const selected = await open({ multiple: false, directory: false });
+    if (typeof selected === "string") {
+      setSshDraft({ ...sshDraft, privateKeyPath: selected });
+    }
   };
 
   const closeSshDialog = () => {
@@ -407,7 +448,11 @@ const DiskList = () => {
           <div className="section-toolbar">
             <div>
               <h2 id="cloud-storage-title">Cloud Storage</h2>
-              <p>OneDrive and Google Drive metadata scanning</p>
+              <p>
+                {googleDriveEnabled
+                  ? "OneDrive and Google Drive metadata scanning"
+                  : "OneDrive metadata scanning"}
+              </p>
             </div>
             <div className="section-actions">
               <button
@@ -443,7 +488,7 @@ const DiskList = () => {
                   OneDrive
                 </button>
               )}
-              {cloudBusy === "google-connect" ? (
+              {googleDriveEnabled && (cloudBusy === "google-connect" ? (
                 <button
                   type="button"
                   onClick={() => cancelOAuthConnection("google")}
@@ -467,7 +512,7 @@ const DiskList = () => {
                   <Plus size={14} />
                   Google Drive
                 </button>
-              )}
+              ))}
             </div>
           </div>
           {!oneDrive.configured && (
@@ -475,7 +520,7 @@ const DiskList = () => {
               OneDrive sign-in is not configured in this build.
             </div>
           )}
-          {!googleDrive.configured && (
+          {googleDriveEnabled && !googleDrive.configured && (
             <div className="inline-alert inline-alert-warning">
               Google Drive sign-in is not configured in this build.
             </div>
@@ -581,7 +626,7 @@ const DiskList = () => {
                 </div>
               );
             })}
-            {googleDrive.accounts.map((account) => {
+            {googleDriveEnabled && googleDrive.accounts.map((account) => {
               const percent = account.totalSpace > 0
                 ? Math.min(100, (account.usedSpace / account.totalSpace) * 100)
                 : 0;
@@ -656,7 +701,11 @@ const DiskList = () => {
           <div className="section-toolbar">
             <div>
               <h2 id="remote-storage-title">Remote Servers</h2>
-              <p>Scan a remote path with a saved password or your SSH key configuration</p>
+              <p>
+                {isMacAppStore
+                  ? "Scan a remote path with a saved password or selected private key"
+                  : "Scan a remote path with a saved password or your SSH key configuration"}
+              </p>
             </div>
             <button type="button" className="button button-secondary" onClick={openNewSshConnection}>
               <Plus size={14} />
@@ -770,7 +819,14 @@ const DiskList = () => {
             </div>
             <div className="ssh-form">
               <label><span>Name</span><input value={sshDraft.name} placeholder="Production server" onChange={(event) => setSshDraft({ ...sshDraft, name: event.target.value })} /></label>
-              <label><span>Host or SSH alias</span><input value={sshDraft.host} placeholder="user@example.com or my-server" onChange={(event) => setSshDraft({ ...sshDraft, host: event.target.value })} /></label>
+              <label>
+                <span>{isMacAppStore ? "SSH host" : "Host or SSH alias"}</span>
+                <input
+                  value={sshDraft.host}
+                  placeholder={isMacAppStore ? "user@example.com" : "user@example.com or my-server"}
+                  onChange={(event) => setSshDraft({ ...sshDraft, host: event.target.value })}
+                />
+              </label>
               <div className="ssh-form-grid">
                 <label><span>Port</span><input type="number" min="1" max="65535" value={sshDraft.port} onChange={(event) => setSshDraft({ ...sshDraft, port: Number(event.target.value) })} /></label>
                 <label><span>Remote path</span><input value={sshDraft.path} placeholder="/" onChange={(event) => setSshDraft({ ...sshDraft, path: event.target.value })} /></label>
@@ -790,7 +846,7 @@ const DiskList = () => {
                   onClick={() => setSshDraft({ ...sshDraft, authMethod: "key", password: "" })}
                 >
                   <KeyRound size={14} />
-                  I have configured an SSH key
+                  {isMacAppStore ? "Private key" : "I have configured an SSH key"}
                 </button>
               </div>
               {sshDraft.authMethod === "password" && (
@@ -820,11 +876,65 @@ const DiskList = () => {
                   </div>
                 </label>
               )}
+              {isMacAppStore && sshDraft.authMethod === "key" && (
+                <>
+                  <label>
+                    <span>Private key</span>
+                    <div className="ssh-password-field">
+                      <input
+                        readOnly
+                        value={sshDraft.privateKeyPath}
+                        placeholder={
+                          editingSshConnection?.hasPrivateKey
+                            ? "A private key is saved in macOS Keychain"
+                            : "Choose a private key"
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        onClick={chooseSshPrivateKey}
+                      >
+                        Choose
+                      </button>
+                    </div>
+                  </label>
+                  <label>
+                    <span>Private-key passphrase (optional)</span>
+                    <div className="ssh-password-field">
+                      <input
+                        type={showSshPassword ? "text" : "password"}
+                        value={sshDraft.keyPassphrase}
+                        autoComplete="off"
+                        placeholder={
+                          editingSshConnection?.hasPrivateKey
+                            ? "Leave blank to keep the saved passphrase"
+                            : "Passphrase, if the key is encrypted"
+                        }
+                        onChange={(event) =>
+                          setSshDraft({ ...sshDraft, keyPassphrase: event.target.value })
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="icon-button"
+                        title={showSshPassword ? "Hide passphrase" : "Show passphrase"}
+                        aria-label={showSshPassword ? "Hide passphrase" : "Show passphrase"}
+                        onClick={() => setShowSshPassword((visible) => !visible)}
+                      >
+                        {showSshPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
+                  </label>
+                </>
+              )}
               <div className="ssh-form-note">
                 {sshDraft.authMethod === "password"
                   ? editingSshConnection?.authMethod === "password"
                     ? "Leave the password blank to keep it unchanged. Passwords are stored in macOS Keychain."
                     : "The password is stored in macOS Keychain and is never written to DuckDisk's connection file."
+                  : isMacAppStore
+                  ? "The selected private key is copied into macOS Keychain for this connection and is never uploaded by DuckDisk. The server fingerprint is confirmed before it is trusted."
                   : "DuckDisk uses macOS ssh, ~/.ssh/config, SSH Agent, and your existing private keys."}
               </div>
               {cloudError && (
@@ -841,6 +951,10 @@ const DiskList = () => {
                     || (sshDraft.authMethod === "password"
                       && !sshDraft.password
                       && editingSshConnection?.authMethod !== "password")
+                    || (isMacAppStore
+                      && sshDraft.authMethod === "key"
+                      && !sshDraft.privateKeyPath
+                      && !editingSshConnection?.hasPrivateKey)
                     || cloudBusy !== null
                   }
                   onClick={saveSshConnection}
@@ -886,18 +1000,19 @@ const DiskList = () => {
                 DuckDisk reads file and folder metadata to calculate storage use.
                 It does not download cloud file contents for analysis.
               </p>
-              <p>
+              {googleDriveEnabled && <p>
                 Google Drive requires its full Drive permission to move any existing
                 user-selected file or folder to Trash. DuckDisk uses that permission
                 only for metadata scanning and the Trash actions you explicitly start.
-              </p>
+              </p>}
               <p>
                 Sign-in tokens are stored in macOS Keychain and scan metadata is
                 cached only on this Mac. DuckDisk does not operate an account-data server.
               </p>
               <p>
-                Deleting from a cloud scan moves the selected item to OneDrive's
-                Recycle Bin or Google Drive Trash, where the provider may allow recovery.
+                {googleDriveEnabled
+                  ? "Deleting from a cloud scan moves the selected item to OneDrive's Recycle Bin or Google Drive Trash, where the provider may allow recovery."
+                  : "Deleting from a cloud scan moves the selected item to OneDrive's Recycle Bin, where Microsoft may allow recovery."}
               </p>
               <div className="flex flex-wrap gap-3">
                 <button
@@ -917,7 +1032,7 @@ const DiskList = () => {
                   Terms
                 </button>
               </div>
-              {googleAccountToRevoke && (
+              {googleDriveEnabled && googleAccountToRevoke && (
                 <div className="rounded border border-red-400/30 bg-red-950/20 p-4">
                   <div className="font-semibold text-red-100">
                     Revoke Google Drive access for {googleAccountToRevoke.name}?
@@ -977,7 +1092,7 @@ const DiskList = () => {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {updateCheck?.updateAvailable && (
+          {!isMacAppStore && updateCheck?.updateAvailable && (
             <button
               type="button"
               onClick={() => openExternal(updateCheck.releaseUrl)}
@@ -987,7 +1102,7 @@ const DiskList = () => {
               View Release
             </button>
           )}
-          <button
+          {!isMacAppStore && <button
             type="button"
             onClick={checkForUpdates}
             disabled={isCheckingUpdates}
@@ -995,15 +1110,15 @@ const DiskList = () => {
           >
             <RefreshCw size={14} className={isCheckingUpdates ? "animate-spin" : ""} />
             {isCheckingUpdates ? "Checking..." : "Check for Updates"}
-          </button>
-          <button
+          </button>}
+          {!isMacAppStore && <button
             type="button"
             onClick={() => invoke("open_full_disk_access_settings")}
             className="button button-secondary"
           >
             <ShieldCheck size={14} />
             Grant Full Disk Access
-          </button>
+          </button>}
           <div className="version-label">v {appVersion}</div>
         </div>
       </footer>

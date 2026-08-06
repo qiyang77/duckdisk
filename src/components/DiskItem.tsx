@@ -4,6 +4,9 @@ import removableDriver from "../assets/removable-drive.png";
 import { useNavigate } from "../router";
 import { formatBytes } from "../formatBytes";
 import { ChevronRight } from "lucide-react";
+import { open } from "@tauri-apps/api/dialog";
+
+const isMacAppStore = import.meta.env.VITE_DISTRIBUTION === "mas";
 
 const DiskItem = ({ disk }: any) => {
   const navigate = useNavigate();
@@ -12,12 +15,24 @@ const DiskItem = ({ disk }: any) => {
   const usageTone = perc >= 0.85 ? "critical" : perc >= 0.7 ? "warning" : "healthy";
 
   const icona = disk.isRemovable ? removableDriver : diskIcon;
-  const scanDisk = () => {
+  const scanDisk = async () => {
+    let scanPath = disk.sMountPoint;
+    if (isMacAppStore) {
+      const selected = await open({
+        multiple: false,
+        directory: true,
+        defaultPath: disk.sMountPoint,
+        title: `Allow DuckDisk to scan ${disk.name || "this volume"}`,
+      });
+      if (typeof selected !== "string") return;
+      scanPath = selected;
+    }
     navigate("/disk", {
       state: {
-        disk: disk.sMountPoint,
+        disk: scanPath,
         used: usedSpace,
         fullscan: true,
+        isDirectory: isMacAppStore,
       },
     });
   };
@@ -29,13 +44,13 @@ const DiskItem = ({ disk }: any) => {
       aria-label={`Scan ${disk.name || "Local Disk"}`}
       onContextMenu={(e) => {
         e.preventDefault();
-        scanDisk();
+        void scanDisk();
       }}
-      onClick={scanDisk}
+      onClick={() => void scanDisk()}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          scanDisk();
+          void scanDisk();
         }
       }}
       className="storage-row group"

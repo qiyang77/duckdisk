@@ -1,20 +1,24 @@
+#[cfg(feature = "google-drive")]
 mod google_drive;
 mod local_files;
 mod oauth_config;
 mod onedrive;
 mod scan;
+#[cfg(not(feature = "mas"))]
+mod ssh;
+#[cfg(feature = "mas")]
+#[path = "ssh_mas.rs"]
 mod ssh;
 mod temp_files;
+#[cfg(feature = "direct")]
 mod updates;
-mod window_style;
 
 use serde::Serialize;
+#[cfg(feature = "direct")]
 use std::process::Command;
 use std::sync::Mutex;
 use sysinfo::{DiskExt, System, SystemExt};
 use tauri::api::process::CommandChild;
-use tauri::Manager;
-use window_vibrancy::NSVisualEffectMaterial;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,73 +39,126 @@ fn main() {
             std::process::exit(1);
         }
     }
-    tauri::Builder::default()
-        .manage(MyState(Default::default()))
-        .setup(|app| {
-            let window = app.get_window("main").unwrap();
-            // window.open_devtools();
-            window_vibrancy::apply_vibrancy(&window, NSVisualEffectMaterial::HudWindow, None, None)
-                .expect("Error applying blurred bg");
+    let builder = tauri::Builder::default().manage(MyState(Default::default()));
 
-            window_style::set_window_styles(&window).unwrap();
+    #[cfg(feature = "google-drive")]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        get_disks,
+        start_scanning,
+        stop_scanning,
+        read_scan_result,
+        read_scan_error_report,
+        read_cached_scan_result,
+        has_cached_scan_index,
+        clear_cached_scan_result,
+        delete_local_item,
+        refresh_scan_path,
+        get_onedrive_state,
+        connect_onedrive_account,
+        cancel_onedrive_connection,
+        disconnect_onedrive_account,
+        start_onedrive_scan,
+        stop_onedrive_scan,
+        read_onedrive_scan_result,
+        refresh_onedrive_item,
+        delete_onedrive_items,
+        get_google_drive_state,
+        connect_google_drive_account,
+        cancel_google_drive_connection,
+        disconnect_google_drive_account,
+        revoke_google_drive_account,
+        start_google_drive_scan,
+        stop_google_drive_scan,
+        read_google_drive_scan_result,
+        delete_google_drive_items,
+        get_ssh_connections,
+        inspect_ssh_host_key,
+        get_ssh_storage_usage,
+        save_ssh_connection,
+        remove_ssh_connection,
+        start_ssh_scan,
+        stop_ssh_scan,
+        clear_ssh_cached_scan_result,
+        read_ssh_scan_result,
+        delete_ssh_items,
+        check_for_updates,
+        open_full_disk_access_settings,
+        show_in_folder
+    ]);
 
-            // app.listen_global("scan_stop", |event| {
-            //     let s = app.state::<MyState>();
-            //     s.0.lock().unwrap().take().unwrap().kill();
-            // });
-            Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
-            get_disks,
-            start_scanning,
-            stop_scanning,
-            read_scan_result,
-            read_scan_error_report,
-            read_cached_scan_result,
-            has_cached_scan_index,
-            clear_cached_scan_result,
-            delete_local_item,
-            refresh_scan_path,
-            get_onedrive_state,
-            connect_onedrive_account,
-            cancel_onedrive_connection,
-            disconnect_onedrive_account,
-            start_onedrive_scan,
-            stop_onedrive_scan,
-            read_onedrive_scan_result,
-            refresh_onedrive_item,
-            delete_onedrive_items,
-            get_google_drive_state,
-            connect_google_drive_account,
-            cancel_google_drive_connection,
-            disconnect_google_drive_account,
-            revoke_google_drive_account,
-            start_google_drive_scan,
-            stop_google_drive_scan,
-            read_google_drive_scan_result,
-            delete_google_drive_items,
-            get_ssh_connections,
-            get_ssh_storage_usage,
-            save_ssh_connection,
-            remove_ssh_connection,
-            start_ssh_scan,
-            stop_ssh_scan,
-            clear_ssh_cached_scan_result,
-            read_ssh_scan_result,
-            delete_ssh_items,
-            check_for_updates,
-            open_full_disk_access_settings,
-            show_in_folder
-        ])
+    #[cfg(not(feature = "google-drive"))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        get_disks,
+        start_scanning,
+        stop_scanning,
+        read_scan_result,
+        read_scan_error_report,
+        read_cached_scan_result,
+        has_cached_scan_index,
+        clear_cached_scan_result,
+        delete_local_item,
+        refresh_scan_path,
+        get_onedrive_state,
+        connect_onedrive_account,
+        cancel_onedrive_connection,
+        disconnect_onedrive_account,
+        start_onedrive_scan,
+        stop_onedrive_scan,
+        read_onedrive_scan_result,
+        refresh_onedrive_item,
+        delete_onedrive_items,
+        get_ssh_connections,
+        inspect_ssh_host_key,
+        get_ssh_storage_usage,
+        save_ssh_connection,
+        remove_ssh_connection,
+        start_ssh_scan,
+        stop_ssh_scan,
+        clear_ssh_cached_scan_result,
+        read_ssh_scan_result,
+        delete_ssh_items,
+        show_in_folder
+    ]);
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
 #[tauri::command]
+fn inspect_ssh_host_key(host: String, port: u16) -> Result<String, String> {
+    ssh::inspect_host_key(&host, port)
+}
+
+#[cfg(feature = "direct")]
+#[tauri::command]
 fn show_in_folder(path: String) {
     Command::new("open").args(["-R", &path]).spawn().unwrap();
 }
 
+#[cfg(feature = "mas")]
+#[tauri::command]
+fn show_in_folder(path: String) -> Result<(), String> {
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
+    use std::ffi::CString;
+
+    let path =
+        CString::new(path).map_err(|_| "The selected path contains a null byte.".to_string())?;
+    unsafe {
+        let ns_path: *mut Object = msg_send![class!(NSString), stringWithUTF8String: path.as_ptr()];
+        if ns_path.is_null() {
+            return Err("Could not convert the selected path for Finder.".to_string());
+        }
+        let url: *mut Object = msg_send![class!(NSURL), fileURLWithPath: ns_path];
+        let urls: *mut Object = msg_send![class!(NSArray), arrayWithObject: url];
+        let workspace: *mut Object = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let _: () = msg_send![workspace, activateFileViewerSelectingURLs: urls];
+    }
+    Ok(())
+}
+
+#[cfg(feature = "direct")]
 #[tauri::command]
 fn open_full_disk_access_settings() -> Result<(), String> {
     Command::new("open")
@@ -274,6 +331,7 @@ async fn delete_onedrive_items(
 }
 
 #[tauri::command]
+#[cfg(feature = "google-drive")]
 fn get_google_drive_state(
     app_handle: tauri::AppHandle,
 ) -> Result<google_drive::GoogleDriveState, String> {
@@ -281,6 +339,7 @@ fn get_google_drive_state(
 }
 
 #[tauri::command]
+#[cfg(feature = "google-drive")]
 async fn connect_google_drive_account(
     app_handle: tauri::AppHandle,
 ) -> Result<google_drive::GoogleDriveAccount, String> {
@@ -288,11 +347,13 @@ async fn connect_google_drive_account(
 }
 
 #[tauri::command]
+#[cfg(feature = "google-drive")]
 fn cancel_google_drive_connection() {
     google_drive::cancel_connection();
 }
 
 #[tauri::command]
+#[cfg(feature = "google-drive")]
 fn disconnect_google_drive_account(
     app_handle: tauri::AppHandle,
     account_id: String,
@@ -301,6 +362,7 @@ fn disconnect_google_drive_account(
 }
 
 #[tauri::command]
+#[cfg(feature = "google-drive")]
 async fn revoke_google_drive_account(
     app_handle: tauri::AppHandle,
     account_id: String,
@@ -309,6 +371,7 @@ async fn revoke_google_drive_account(
 }
 
 #[tauri::command]
+#[cfg(feature = "google-drive")]
 fn start_google_drive_scan(
     app_handle: tauri::AppHandle,
     account_id: String,
@@ -318,16 +381,19 @@ fn start_google_drive_scan(
 }
 
 #[tauri::command]
+#[cfg(feature = "google-drive")]
 fn stop_google_drive_scan(account_id: String) {
     google_drive::stop_scan(&account_id);
 }
 
 #[tauri::command]
+#[cfg(feature = "google-drive")]
 fn read_google_drive_scan_result(path: String) -> Result<String, String> {
     google_drive::read_scan_result(&path)
 }
 
 #[tauri::command]
+#[cfg(feature = "google-drive")]
 async fn delete_google_drive_items(
     app_handle: tauri::AppHandle,
     account_id: String,
@@ -409,6 +475,7 @@ fn read_ssh_scan_result(path: String) -> Result<String, String> {
     ssh::read_scan_result(&path)
 }
 
+#[cfg(feature = "direct")]
 #[tauri::command]
 async fn check_for_updates() -> Result<updates::UpdateCheck, String> {
     updates::check(env!("CARGO_PKG_VERSION")).await

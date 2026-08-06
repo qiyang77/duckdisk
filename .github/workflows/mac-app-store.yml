@@ -1,0 +1,126 @@
+name: Mac App Store
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: App Store build number (must increase for every upload)
+        required: true
+        default: "509"
+        type: string
+      upload:
+        description: Upload the validated package to App Store Connect
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Rust setup
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Import Mac App Store certificates
+        env:
+          MAS_APP_CERTIFICATE: ${{ secrets.MAS_APP_CERTIFICATE }}
+          MAS_APP_CERTIFICATE_PASSWORD: ${{ secrets.MAS_APP_CERTIFICATE_PASSWORD }}
+          MAS_INSTALLER_CERTIFICATE: ${{ secrets.MAS_INSTALLER_CERTIFICATE }}
+          MAS_INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.MAS_INSTALLER_CERTIFICATE_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          keychain_path="$RUNNER_TEMP/duckdisk-mas.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          app_certificate="$RUNNER_TEMP/duckdisk-mas-app.p12"
+          installer_certificate="$RUNNER_TEMP/duckdisk-mas-installer.p12"
+          printf '%s' "$MAS_APP_CERTIFICATE" | base64 --decode > "$app_certificate"
+          printf '%s' "$MAS_INSTALLER_CERTIFICATE" | base64 --decode > "$installer_certificate"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$app_certificate" -P "$MAS_APP_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security import "$installer_certificate" -P "$MAS_INSTALLER_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          rm -f "$app_certificate" "$installer_certificate"
+
+      - name: Build and sign Mac App Store package
+        env:
+          MAS_BUILD_NUMBER: ${{ inputs.build_number }}
+          MAS_APP_SIGNING_IDENTITY: ${{ secrets.MAS_APP_SIGNING_IDENTITY }}
+          MAS_INSTALLER_SIGNING_IDENTITY: ${{ secrets.MAS_INSTALLER_SIGNING_IDENTITY }}
+          MAS_PROVISIONING_PROFILE: ${{ secrets.MAS_PROVISIONING_PROFILE }}
+          MAS_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DUCKDISK_ONEDRIVE_CLIENT_ID: ${{ secrets.ONEDRIVE_CLIENT_ID }}
+        run: npm run release:macos-store
+
+      - name: Locate package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          package_path="src-tauri/target/mas-store/DuckDisk-${version}-MAS.pkg"
+          test -f "$package_path"
+          echo "MAS_PACKAGE_PATH=$package_path" >> "$GITHUB_ENV"
+
+      - name: Validate package with App Store Connect
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          key_dir="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$key_dir"
+          key_path="$key_dir/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          xcrun altool --validate-app \
+            --file "$MAS_PACKAGE_PATH" \
+            --type macos \
+            --apiKey "$APP_STORE_CONNECT_KEY_ID" \
+            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+
+      - name: Upload package to App Store Connect
+        if: inputs.upload
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun altool --upload-app \
+            --file "$MAS_PACKAGE_PATH" \
+            --type macos \
+            --apiKey "$APP_STORE_CONNECT_KEY_ID" \
+            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DuckDisk-Mac-App-Store
+          path: |
+            src-tauri/target/mas-store/*.zip
+            src-tauri/target/mas-store/*.pkg

@@ -18,7 +18,7 @@ function App() {
   return (
     <Router initialLocation={initialLocation}>
       <div className="app-shell">
-        <TitleBar></TitleBar>
+        <TitleBar />
         <CurrentPage />
       </div>
     </Router>

@@ -1,4 +1,5 @@
 pub const ONEDRIVE_CLIENT_ID: &str = "c3ecb115-5bd3-4295-a612-898938f75dce";
+#[cfg(feature = "google-drive")]
 pub const GOOGLE_DRIVE_CLIENT_ID: &str =
     "1012996051453-5fub1j4uce77todjq2l5rig23ameg1tn.apps.googleusercontent.com";
 
@@ -8,6 +9,7 @@ pub fn onedrive_client_id() -> &'static str {
         .unwrap_or(ONEDRIVE_CLIENT_ID)
 }
 
+#[cfg(feature = "google-drive")]
 pub fn google_drive_client_id() -> &'static str {
     option_env!("DUCKDISK_GOOGLE_CLIENT_ID")
         .filter(|value| !value.trim().is_empty())

@@ -4,6 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
+#[cfg(not(feature = "mas"))]
 use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -235,9 +236,14 @@ pub async fn connect_account(app_handle: &tauri::AppHandle) -> Result<OneDriveAc
         .add_extra_param("prompt", "select_account")
         .url();
 
+    #[cfg(not(feature = "mas"))]
     Command::new("open")
         .arg(authorize_url.as_str())
         .spawn()
+        .map_err(|err| format!("Could not open Microsoft sign-in: {err}"))?;
+
+    #[cfg(feature = "mas")]
+    tauri::api::shell::open(&app_handle.shell_scope(), authorize_url.as_str(), None)
         .map_err(|err| format!("Could not open Microsoft sign-in: {err}"))?;
 
     let expected_state = csrf_token.secret().to_string();

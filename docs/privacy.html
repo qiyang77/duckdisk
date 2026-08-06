@@ -57,7 +57,7 @@
           <section>
             <h2>Data protection and security</h2>
             <ul>
-              <li>OAuth refresh tokens and saved SSH passwords are stored in macOS Keychain, which applies macOS encryption and access controls. DuckDisk does not write these credentials to its scan cache or connection files.</li>
+              <li>OAuth refresh tokens, saved SSH passwords, and private keys selected in the Mac App Store version are stored in macOS Keychain, which applies macOS encryption and access controls. DuckDisk does not write these credentials to its scan cache or connection files.</li>
               <li>Google Drive and OneDrive requests are sent directly from DuckDisk to the providers' HTTPS endpoints using TLS. SSH connections use the encrypted SSH protocol.</li>
               <li>OAuth access tokens are short-lived, used only in memory for provider requests, and are not included in DuckDisk logs or scan caches.</li>
               <li>Scan metadata and account records stay in DuckDisk's application data under the current macOS user account and are protected by the account's standard macOS file permissions. DuckDisk does not upload this local data to a DuckDisk-operated server.</li>
@@ -68,6 +68,7 @@
           <section>
             <h2>Cloud actions</h2>
             <p>When you choose to remove an item, DuckDisk asks Microsoft OneDrive or Google Drive to move that item to the provider's recoverable trash. DuckDisk does not permanently empty provider trash. No cloud item is changed without a user-initiated action.</p>
+            <p>SSH removal is different: when you explicitly confirm a remote deletion, DuckDisk asks the configured SSH server to permanently delete the selected item. The app restricts this operation to the configured remote root and refuses to delete that root itself, but the remote server may not provide a recoverable trash.</p>
           </section>
           <section>
             <h2>Sharing and selling</h2>

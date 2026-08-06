@@ -129,6 +129,10 @@ pub fn get_connections(app_handle: &tauri::AppHandle) -> Result<Vec<SshConnectio
     read_connections(app_handle)
 }
 
+pub fn inspect_host_key(_host: &str, _port: u16) -> Result<String, String> {
+    Err("Host-key inspection is only used by the Mac App Store SSH client".to_string())
+}
+
 pub fn get_storage_usage(
     app_handle: &tauri::AppHandle,
     connection_id: &str,
