@@ -14,6 +14,7 @@
       "identifier": "com.duckdisk.app",
       "macOS": {
         "entitlements": "entitlements.mas.plist",
+        "minimumSystemVersion": "12.0",
         "signingIdentity": null
       },
       "targets": [
