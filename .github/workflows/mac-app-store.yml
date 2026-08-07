@@ -6,7 +6,7 @@ on:
       build_number:
         description: App Store build number (must increase for every upload)
         required: true
-        default: "509"
+        default: "510"
         type: string
       upload:
         description: Upload the validated package to App Store Connect

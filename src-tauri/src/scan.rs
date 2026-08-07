@@ -150,8 +150,7 @@ pub fn start(
         .args(paths_to_scan)
         .spawn()
         .expect("Failed to spawn sidecar");
-
-    *state.0.lock().unwrap() = Some(child);
+    let child_pid = register_child(&state, child);
 
     // unlisten to the event using the `id` returned on the `listen_global` function
     // an `once_global` API is also exposed on the `App` struct
@@ -217,6 +216,7 @@ pub fn start(
                 }
                 CommandEvent::Terminated(t) => {
                     println!("{t:?}");
+                    unregister_child(&app_handle.state::<MyState>(), child_pid);
                     // app_handle.unlisten(id);
                     // child.kill();
                 }
@@ -536,11 +536,12 @@ async fn run_pdu_for_paths(
     let error_regex =
         Regex::new(r#"^\[error\] (\S+) "(.+)": (.+)$"#).map_err(|err| err.to_string())?;
 
-    let (mut rx, _child) = TauriCommand::new_sidecar("pdu")
+    let (mut rx, child) = TauriCommand::new_sidecar("pdu")
         .map_err(|err| err.to_string())?
         .args(args)
         .spawn()
         .map_err(|err| err.to_string())?;
+    let child_pid = register_child(&app_handle.state::<MyState>(), child);
 
     let mut stdout = None;
     let mut items = 0;
@@ -572,6 +573,7 @@ async fn run_pdu_for_paths(
             _ => {}
         }
     }
+    unregister_child(&app_handle.state::<MyState>(), child_pid);
 
     let error_report = build_error_report(error_records);
     let parsed = stdout
@@ -785,10 +787,39 @@ pub fn read_error_report(path: String) -> Result<String, String> {
     Ok(content)
 }
 
-pub fn stop(state: tauri::State<'_, MyState>) {
-    if let Some(child) = state.0.lock().unwrap().take() {
+fn register_child(state: &MyState, child: tauri::api::process::CommandChild) -> u32 {
+    let pid = child.pid();
+    state
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .push(child);
+    pid
+}
+
+fn unregister_child(state: &MyState, pid: u32) {
+    state
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .retain(|child| child.pid() != pid);
+}
+
+pub fn stop_all(state: &MyState) {
+    let children = {
+        let mut children = state
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::mem::take(&mut *children)
+    };
+    for child in children {
         child.kill().ok();
     }
+}
+
+pub fn stop(state: tauri::State<'_, MyState>) {
+    stop_all(&state);
 }
 
 fn write_scan_result(content: &str) -> std::io::Result<PathBuf> {

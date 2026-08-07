@@ -19,6 +19,7 @@ use std::process::Command;
 use std::sync::Mutex;
 use sysinfo::{DiskExt, System, SystemExt};
 use tauri::api::process::CommandChild;
+use tauri::Manager;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,9 +121,17 @@ fn main() {
         show_in_folder
     ]);
 
-    builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    let app = builder
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+    app.run(|app_handle, event| {
+        if matches!(
+            event,
+            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+        ) {
+            scan::stop_all(&app_handle.state::<MyState>());
+        }
+    });
 }
 
 #[tauri::command]
@@ -188,7 +197,7 @@ fn get_disks() -> String {
     serde_json::to_string(&vec).unwrap().into()
 }
 
-pub struct MyState(Mutex<Option<CommandChild>>);
+pub struct MyState(Mutex<Vec<CommandChild>>);
 
 #[tauri::command]
 fn start_scanning(

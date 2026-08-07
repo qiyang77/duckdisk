@@ -6,7 +6,7 @@ cd "$root_dir"
 
 export CI=true
 version="$(node -p "require('./package.json').version")"
-build_number="${MAS_BUILD_NUMBER:-509}"
+build_number="${MAS_BUILD_NUMBER:-510}"
 store_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/duckdisk-mas.XXXXXX")"
 store_source_dir="$store_work_dir/source"
 store_output_dir="$root_dir/src-tauri/target/mas-store"
@@ -55,6 +55,22 @@ export CARGO_TARGET_DIR="$root_dir/src-tauri/target/mas"
 
 source_app="$CARGO_TARGET_DIR/release/bundle/macos/DuckDisk.app"
 test -d "$source_app"
+
+# App Review rejects binaries that link the private IOHID temperature APIs used
+# by sysinfo unless its Apple App Store compatibility feature is enabled. Scan
+# every Mach-O in the bundle so a future dependency change cannot regress this.
+prohibited_api_pattern='IOHIDEventGetFloatValue|IOHIDEventSystemClientCreate|IOHIDEventSystemClientSetMatching|IOHIDServiceClientCopyEvent'
+while IFS= read -r candidate; do
+  if file "$candidate" | grep -q 'Mach-O'; then
+    undefined_symbols="$(nm -u "$candidate" 2>/dev/null || true)"
+    if grep -Eq "$prohibited_api_pattern" <<< "$undefined_symbols"; then
+      echo "Mac App Store bundle references a prohibited private IOHID API: $candidate" >&2
+      grep -E "$prohibited_api_pattern" <<< "$undefined_symbols" >&2
+      exit 1
+    fi
+  fi
+done < <(find "$source_app/Contents" -type f)
+
 mkdir -p "$store_output_dir"
 prepared_app="$store_work_dir/DuckDisk.app"
 ditto --noextattr --norsrc "$source_app" "$prepared_app"
