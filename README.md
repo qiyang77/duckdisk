@@ -3,11 +3,12 @@
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 [![release](https://img.shields.io/github/v/release/qiyang77/duckdisk?label=release)](https://github.com/qiyang77/duckdisk/releases)
 [![website](https://img.shields.io/badge/website-duckdisk-blue)](https://duckdisk.com/)
+[![Mac App Store](https://img.shields.io/badge/Mac_App_Store-Download-black?logo=apple)](https://apps.apple.com/app/duckdisk/id6798893880?mt=12)
 ![platform](https://img.shields.io/badge/platform-macOS-black)
 ![arch](https://img.shields.io/badge/arch-arm64-lightgrey)
 ![stack](https://img.shields.io/badge/stack-Tauri%20%7C%20Rust%20%7C%20React-orange)
 
-**DuckDisk** is a macOS disk, cloud storage, and remote server analyzer inspired by **WizTree-style** workflows. It scans disks, folders, OneDrive, Google Drive, and SSH paths, then shows where space is going in dense tables.
+**DuckDisk** is an informative, table-first storage analyzer for macOS inspired by **WizTree-style** workflows. It scans disks, folders, OneDrive, Google Drive, and SSH paths, then keeps directory sizes, allocated space, parent percentages, file and folder counts, and file-type totals visible in one dense tree view.
 
 The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
@@ -15,7 +16,8 @@ Website: https://duckdisk.com/
 
 ## What's New in v0.5.9
 
-- Added Apple notarization.
+- Added Apple notarization for the direct-download build.
+- Added a sandboxed [Mac App Store edition](https://apps.apple.com/app/duckdisk/id6798893880?mt=12).
 
 ## Screenshots
 
@@ -59,10 +61,26 @@ See the [Privacy Policy](https://duckdisk.com/privacy.html) and [Terms of Use](h
 
 ## Installation
 
-Download the `.dmg`, open it, and drag DuckDisk into Applications.
+Choose the distribution that fits your workflow:
 
-Release builds are signed with a Developer ID certificate and notarized by
-Apple. macOS can verify the downloaded app before its first launch.
+| | [Mac App Store](https://apps.apple.com/app/duckdisk/id6798893880?mt=12) | [Direct download](https://github.com/qiyang77/duckdisk/releases/latest) |
+| --- | --- | --- |
+| Local scans | User-selected folders and volumes | Full-disk and folder scanning with Full Disk Access |
+| OneDrive | Yes | Yes |
+| Google Drive | Not included | Yes |
+| SSH | Sandboxed embedded SSH client | System `ssh`, existing keys, and `~/.ssh/config` |
+| Updates | Mac App Store | GitHub releases |
+
+### Mac App Store
+
+[Download DuckDisk from the Mac App Store](https://apps.apple.com/app/duckdisk/id6798893880?mt=12). This edition uses App Sandbox and asks you to choose the local folders or volumes it may access.
+
+### Direct download
+
+Download the latest `.dmg` from [GitHub Releases](https://github.com/qiyang77/duckdisk/releases/latest), open it, and drag DuckDisk into Applications.
+
+Direct-download releases are signed with a Developer ID certificate and
+notarized by Apple. macOS can verify the downloaded app before its first launch.
 
 Local development builds may use ad-hoc signing.
 
