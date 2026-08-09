@@ -142,6 +142,7 @@ const DiskList = () => {
     "onedrive" | "google" | null
   >(null);
   const [cloudError, setCloudError] = useState<string | null>(null);
+  const [sshError, setSshError] = useState<string | null>(null);
   const [isCheckingUpdates, setCheckingUpdates] = useState(false);
   const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -214,9 +215,10 @@ const DiskList = () => {
   };
 
   useEffect(() => {
-    const syncTasks = [syncOneDrive(), syncSshConnections()];
-    if (googleDriveEnabled) syncTasks.push(syncGoogleDrive());
-    Promise.all(syncTasks).catch((error) => setCloudError(String(error)));
+    const cloudSyncTasks = [syncOneDrive()];
+    if (googleDriveEnabled) cloudSyncTasks.push(syncGoogleDrive());
+    Promise.all(cloudSyncTasks).catch((error) => setCloudError(String(error)));
+    syncSshConnections().catch((error) => setSshError(String(error)));
   }, []);
 
   const connectOneDrive = async () => {
@@ -300,7 +302,7 @@ const DiskList = () => {
 
   const saveSshConnection = async () => {
     setCloudBusy("ssh-save");
-    setCloudError(null);
+    setSshError(null);
     try {
       let connection = sshDraft;
       if (isMacAppStore) {
@@ -327,7 +329,7 @@ const DiskList = () => {
       setSshDraft(emptySshDraft);
       setShowSshPassword(false);
     } catch (error) {
-      setCloudError(String(error));
+      setSshError(String(error));
     } finally {
       setCloudBusy(null);
     }
@@ -337,7 +339,7 @@ const DiskList = () => {
     setEditingSshConnection(null);
     setSshDraft(emptySshDraft);
     setShowSshPassword(false);
-    setCloudError(null);
+    setSshError(null);
     setShowSshDialog(true);
   };
 
@@ -350,7 +352,7 @@ const DiskList = () => {
       keyPassphrase: "",
     });
     setShowSshPassword(false);
-    setCloudError(null);
+    setSshError(null);
     setShowSshDialog(true);
   };
 
@@ -366,16 +368,17 @@ const DiskList = () => {
     setEditingSshConnection(null);
     setSshDraft(emptySshDraft);
     setShowSshPassword(false);
+    setSshError(null);
   };
 
   const removeSshConnection = async (connection: SshConnection) => {
     setCloudBusy(`ssh-${connection.id}`);
-    setCloudError(null);
+    setSshError(null);
     try {
       await invoke("remove_ssh_connection", { connectionId: connection.id });
       await syncSshConnections();
     } catch (error) {
-      setCloudError(String(error));
+      setSshError(String(error));
     } finally {
       setCloudBusy(null);
     }
@@ -712,6 +715,11 @@ const DiskList = () => {
               Add SSH Connection
             </button>
           </div>
+          {sshError && !showSshDialog && (
+            <div className="inline-alert inline-alert-error">
+              {sshError}
+            </div>
+          )}
           <div className="storage-list">
             {sshConnections.length === 0 && (
               <div className="empty-storage-row"><Server size={20} /><span>No SSH connections saved</span></div>
@@ -937,9 +945,9 @@ const DiskList = () => {
                   ? "The selected private key is copied into macOS Keychain for this connection and is never uploaded by DuckDisk. The server fingerprint is confirmed before it is trusted."
                   : "DuckDisk uses macOS ssh, ~/.ssh/config, SSH Agent, and your existing private keys."}
               </div>
-              {cloudError && (
+              {sshError && (
                 <div className="inline-alert inline-alert-error">
-                  {cloudError}
+                  {sshError}
                 </div>
               )}
               <div className="ssh-form-actions">
