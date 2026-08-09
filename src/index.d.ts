@@ -5,6 +5,7 @@ interface DiskItem {
   cloudId?: string;
   value: number;
   size: number;
+  allocatedSize?: number;
   isDirectory: boolean;
   children: Array<DiskItem>;
 }

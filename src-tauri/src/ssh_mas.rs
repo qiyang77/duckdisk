@@ -515,11 +515,14 @@ def walk(path):
     if not folder and not regular:
         return None
     items += 1
-    node = {"name":os.path.basename(path) or path,"cloudId":path,"isDirectory":folder,"size":0,"children":[]}
+    node = {"name":os.path.basename(path) or path,"cloudId":path,"isDirectory":folder,"size":0,"allocatedSize":0,"children":[]}
     if not folder:
         blocks = getattr(info, "st_blocks", None)
-        node["size"] = max(0, int(blocks) * 512 if blocks is not None else int(info.st_size))
-        total += node["size"]
+        allocated = max(0, int(blocks) * 512 if blocks is not None else int(info.st_size))
+        dataless = (getattr(info, "st_flags", 0) & 0x40000000 != 0) or (allocated == 0 and info.st_size > 0)
+        node["size"] = 0 if dataless else max(0, int(info.st_size))
+        node["allocatedSize"] = allocated
+        total += node["allocatedSize"]
         if items % 512 == 0:
             progress()
         return node
@@ -531,8 +534,9 @@ def walk(path):
                     node["children"].append(child)
     except OSError:
         errors += 1
-    node["children"].sort(key=lambda child: child["size"], reverse=True)
+    node["children"].sort(key=lambda child: child["allocatedSize"], reverse=True)
     node["size"] = sum(child["size"] for child in node["children"])
+    node["allocatedSize"] = sum(child["allocatedSize"] for child in node["children"])
     if items % 512 == 0:
         progress()
     return node
@@ -864,7 +868,7 @@ fn cache_path(app_handle: &tauri::AppHandle, connection_id: &str) -> Result<Path
         .ok_or_else(|| "Could not resolve DuckDisk cache directory".to_string())?
         .join("ssh");
     fs::create_dir_all(&directory).map_err(|err| err.to_string())?;
-    Ok(directory.join(format!("{connection_id}.json")))
+    Ok(directory.join(format!("{connection_id}.dual-size-v2-dataless.json")))
 }
 
 fn write_cached_result(

@@ -584,11 +584,14 @@ def walk(path):
     if not folder and not regular:
         return None
     items += 1
-    node = {"name": os.path.basename(path) or path, "cloudId": path, "isDirectory": folder, "size": 0, "children": []}
+    node = {"name": os.path.basename(path) or path, "cloudId": path, "isDirectory": folder, "size": 0, "allocatedSize": 0, "children": []}
     if not folder:
         blocks = getattr(info, "st_blocks", None)
-        node["size"] = max(0, int(blocks) * 512 if blocks is not None else int(info.st_size))
-        total += node["size"]
+        allocated = max(0, int(blocks) * 512 if blocks is not None else int(info.st_size))
+        dataless = (getattr(info, "st_flags", 0) & 0x40000000 != 0) or (allocated == 0 and info.st_size > 0)
+        node["size"] = 0 if dataless else max(0, int(info.st_size))
+        node["allocatedSize"] = allocated
+        total += node["allocatedSize"]
         if items % 512 == 0:
             progress()
         return node
@@ -600,8 +603,9 @@ def walk(path):
                     node["children"].append(child)
     except OSError:
         errors += 1
-    node["children"].sort(key=lambda child: child["size"], reverse=True)
+    node["children"].sort(key=lambda child: child["allocatedSize"], reverse=True)
     node["size"] = sum(child["size"] for child in node["children"])
+    node["allocatedSize"] = sum(child["allocatedSize"] for child in node["children"])
     if items % 512 == 0:
         progress()
     return node
@@ -756,6 +760,7 @@ fn emit_scan_status(app_handle: &tauri::AppHandle, account_id: &str, items: u64,
 
 fn cache_path(app_handle: &tauri::AppHandle, connection_id: &str) -> Result<PathBuf, String> {
     let mut hasher = DefaultHasher::new();
+    "dual-size-v2-dataless".hash(&mut hasher);
     connection_id.hash(&mut hasher);
     app_handle
         .path_resolver()

@@ -807,6 +807,10 @@ a:focus-visible,
   margin-top: 6px;
 }
 
+.results-metrics-with-allocated {
+  grid-template-columns: minmax(128px, 1.35fr) repeat(5, minmax(82px, 1fr));
+}
+
 .metric {
   min-width: 0;
   padding: 1px 14px;
@@ -889,6 +893,37 @@ a:focus-visible,
   text-align: left;
   text-transform: uppercase;
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+}
+
+.data-header-sortable {
+  padding: 0;
+}
+
+.data-header-sort-button {
+  display: flex;
+  width: 100%;
+  height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 6px 8px;
+  color: inherit;
+  text-align: left;
+  text-transform: inherit;
+}
+
+.data-header-sort-button:hover {
+  background: #252c31;
+  color: #c2cbd2;
+}
+
+.data-header-sort-button:focus-visible {
+  outline: 1px solid #54b9dc;
+  outline-offset: -2px;
+}
+
+.data-header-sortable-active {
+  color: #71c8e6;
 }
 
 .data-table tbody tr:nth-child(even) {

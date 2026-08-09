@@ -18,6 +18,7 @@ import {
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowDown,
   ArrowUp,
   ChevronDown,
   ChevronRight,
@@ -58,6 +59,7 @@ type NodeStats = {
   files: number;
   folders: number;
   size: number;
+  allocatedSize: number;
 };
 
 type ExtensionStat = {
@@ -85,6 +87,23 @@ type TreemapBlock = {
 type VisibleRow = {
   node: DiskItem;
   depth: number;
+};
+
+type TreeSortKey =
+  | "name"
+  | "size"
+  | "allocated"
+  | "items"
+  | "files"
+  | "folders";
+
+type TreeMetricKey = Exclude<TreeSortKey, "name">;
+
+type SortDirection = "asc" | "desc";
+
+type TreeSort = {
+  key: TreeSortKey;
+  direction: SortDirection;
 };
 
 type DeleteState = {
@@ -151,7 +170,11 @@ type ScanErrorReport = {
 const getChildren = (node?: DiskItem | null) => node?.children || [];
 
 const sortChildrenBySize = (children: DiskItem[]) =>
-  children.sort((a, b) => (b.size || 0) - (a.size || 0));
+  children.sort(
+    (a, b) =>
+      (b.allocatedSize ?? b.size ?? 0) -
+      (a.allocatedSize ?? a.size ?? 0)
+  );
 
 const isDirectory = (node: DiskItem) =>
   node.isDirectory || Boolean(node.children && node.children.length > 0);
@@ -255,7 +278,28 @@ const phaseLabel = (phase: ScanPhase, disk: string) => {
   }
 };
 
-const emptyStats = { items: 0, files: 0, folders: 0, size: 0 };
+const emptyStats = {
+  items: 0,
+  files: 0,
+  folders: 0,
+  size: 0,
+  allocatedSize: 0,
+};
+
+const getStatsMetric = (stats: NodeStats, metric: TreeMetricKey) => {
+  switch (metric) {
+    case "size":
+      return stats.size;
+    case "allocated":
+      return stats.allocatedSize;
+    case "items":
+      return stats.items;
+    case "files":
+      return stats.files;
+    case "folders":
+      return stats.folders;
+  }
+};
 const emptyScanErrorCounts = {
   operationNotPermitted: 0,
   permissionDenied: 0,
@@ -307,8 +351,20 @@ const buildIndex = (root: DiskItem | null, deletedIds = new Set<string>()) => {
 
     if (!children.length) {
       const stats = isDirectory(node)
-        ? { items: 1, files: 0, folders: 1, size: node.size || 0 }
-        : { items: 1, files: 1, folders: 0, size: node.size || 0 };
+        ? {
+            items: 1,
+            files: 0,
+            folders: 1,
+            size: node.size || 0,
+            allocatedSize: node.allocatedSize ?? node.size ?? 0,
+          }
+        : {
+            items: 1,
+            files: 1,
+            folders: 0,
+            size: node.size || 0,
+            allocatedSize: node.allocatedSize ?? node.size ?? 0,
+          };
       statsMap.set(node.id, stats);
       return stats;
     }
@@ -320,8 +376,9 @@ const buildIndex = (root: DiskItem | null, deletedIds = new Set<string>()) => {
         files: acc.files + child.files,
         folders: acc.folders + child.folders,
         size: acc.size + child.size,
+        allocatedSize: acc.allocatedSize + child.allocatedSize,
       }),
-      { items: 1, files: 0, folders: 1, size: 0 }
+      { items: 1, files: 0, folders: 1, size: 0, allocatedSize: 0 }
     );
     if (stats.size === 0 && (node.size || 0) > 0 && childStats.length === 0) {
       stats.size = node.size;
@@ -339,13 +396,15 @@ const buildIndex = (root: DiskItem | null, deletedIds = new Set<string>()) => {
 
 const buildVisibleRows = (
   nodes: DiskItem[],
-  expandedIds: Set<string>
+  expandedIds: Set<string>,
+  compareNodes: (a: DiskItem, b: DiskItem) => number
 ): VisibleRow[] => {
   const rows: VisibleRow[] = [];
   const stack: VisibleRow[] = [];
+  const sortedNodes = [...nodes].sort(compareNodes);
 
-  for (let index = nodes.length - 1; index >= 0; index -= 1) {
-    stack.push({ node: nodes[index], depth: 0 });
+  for (let index = sortedNodes.length - 1; index >= 0; index -= 1) {
+    stack.push({ node: sortedNodes[index], depth: 0 });
   }
 
   while (stack.length) {
@@ -355,7 +414,7 @@ const buildVisibleRows = (
       continue;
     }
 
-    const children = getChildren(row.node);
+    const children = [...getChildren(row.node)].sort(compareNodes);
     for (let index = children.length - 1; index >= 0; index -= 1) {
       stack.push({ node: children[index], depth: row.depth + 1 });
     }
@@ -457,12 +516,14 @@ const mapRefreshedTree = (raw: any, original: DiskItem): DiskItem => {
       : [];
     sortChildrenBySize(children);
     const size = Number(item.size || 0);
+    const allocatedSize = Number(item.allocatedSize ?? size);
     return {
       ...item,
       id,
       name: isRoot ? original.name : String(item.name || "(unnamed)"),
-      value: size,
+      value: allocatedSize,
       size,
+      allocatedSize,
       isDirectory: isRoot
         ? isDirectory(original)
         : Boolean(item.isDirectory || children.length),
@@ -507,6 +568,58 @@ const TableHeader = ({ children }: { children: ReactNode }) => (
   </th>
 );
 
+const SortableTableHeader = ({
+  children,
+  sortKey,
+  activeSort,
+  onSort,
+}: {
+  children: ReactNode;
+  sortKey: TreeSortKey;
+  activeSort: TreeSort;
+  onSort: (key: TreeSortKey) => void;
+}) => {
+  const active = activeSort.key === sortKey;
+  const nextDirection =
+    active
+      ? activeSort.direction === "desc"
+        ? "ascending"
+        : "descending"
+      : sortKey === "name"
+      ? "ascending"
+      : "descending";
+
+  return (
+    <th
+      className={`data-header data-header-sortable ${
+        active ? "data-header-sortable-active" : ""
+      }`}
+      aria-sort={
+        active
+          ? activeSort.direction === "asc"
+            ? "ascending"
+            : "descending"
+          : "none"
+      }
+    >
+      <button
+        type="button"
+        className="data-header-sort-button"
+        onClick={() => onSort(sortKey)}
+        title={`Sort ${nextDirection}`}
+      >
+        <span>{children}</span>
+        {active &&
+          (activeSort.direction === "asc" ? (
+            <ArrowUp size={11} aria-hidden="true" />
+          ) : (
+            <ArrowDown size={11} aria-hidden="true" />
+          ))}
+      </button>
+    </th>
+  );
+};
+
 const NumberCell = ({ children }: { children: ReactNode }) => (
   <td className="data-cell data-cell-number">
     {children}
@@ -544,6 +657,7 @@ const Scanning = () => {
     source === "googledrive";
   const isSsh = source === "ssh";
   const isCloud = source !== "local";
+  const showsAllocated = !isCloud || isSsh;
   const requiresKeychainApproval = isOneDrive || isGoogleDrive;
   const canDelete = true;
   const usesTrash = isOneDrive || isGoogleDrive;
@@ -607,6 +721,12 @@ const Scanning = () => {
     scrollTop: 0,
     height: 0,
   });
+  const [treeSort, setTreeSort] = useState<TreeSort>({
+    key: showsAllocated ? "allocated" : "size",
+    direction: "desc",
+  });
+  const [parentPercentMetric, setParentPercentMetric] =
+    useState<TreeMetricKey>(showsAllocated ? "allocated" : "size");
   const [deleteState, setDeleteState] = useState<DeleteState>({
     isDeleting: false,
     total: 0,
@@ -657,7 +777,7 @@ const Scanning = () => {
 
     viewport.scrollTop = 0;
     setTreeViewport((current) => ({ ...current, scrollTop: 0 }));
-  }, [currentNode?.id]);
+  }, [currentNode?.id, treeSort.direction, treeSort.key]);
 
   useEffect(() => {
     const preventNativeContextMenu = (event: MouseEvent) => {
@@ -997,9 +1117,31 @@ const Scanning = () => {
     [rootNode, deletedIds]
   );
   const childRows = useMemo(() => getChildren(currentNode), [currentNode]);
+  const compareTreeNodes = useMemo(() => {
+    return (a: DiskItem, b: DiskItem) => {
+      const comparison =
+        treeSort.key === "name"
+          ? getNodeName(a).localeCompare(getNodeName(b), undefined, {
+              numeric: true,
+              sensitivity: "base",
+            })
+          : getStatsMetric(statsMap.get(a.id) || emptyStats, treeSort.key) -
+            getStatsMetric(statsMap.get(b.id) || emptyStats, treeSort.key);
+      const directedComparison =
+        treeSort.direction === "asc" ? comparison : -comparison;
+
+      return (
+        directedComparison ||
+        getNodeName(a).localeCompare(getNodeName(b), undefined, {
+          numeric: true,
+          sensitivity: "base",
+        })
+      );
+    };
+  }, [statsMap, treeSort.direction, treeSort.key]);
   const rows = useMemo(
-    () => buildVisibleRows(childRows, expandedIds),
-    [childRows, expandedIds]
+    () => buildVisibleRows(childRows, expandedIds, compareTreeNodes),
+    [childRows, compareTreeNodes, expandedIds]
   );
   const virtualRange = useMemo(
     () =>
@@ -1023,7 +1165,14 @@ const Scanning = () => {
     : emptyStats;
   const parentNode = currentNode ? parentMap.get(currentNode.id) || null : null;
   const currentSize = currentStats.size;
-  const rootSize = rootNode ? statsMap.get(rootNode.id)?.size || 0 : 0;
+  const currentUsageSize = showsAllocated
+    ? currentStats.allocatedSize
+    : currentStats.size;
+  const rootUsageSize = rootNode
+    ? showsAllocated
+      ? statsMap.get(rootNode.id)?.allocatedSize || 0
+      : statsMap.get(rootNode.id)?.size || 0
+    : 0;
   const scannedTotal = status?.total || 0;
   const issueCount = totalScanIssues(scanIssueReport.counts);
   const canOpenScanIssues =
@@ -1037,12 +1186,14 @@ const Scanning = () => {
       .filter((node) => !isDeletedPath(node.id, deletedIds))
       .map((node) => ({
         node,
-        size: statsMap.get(node.id)?.size || 0,
+        size: showsAllocated
+          ? statsMap.get(node.id)?.allocatedSize || 0
+          : statsMap.get(node.id)?.size || 0,
       }))
       .filter((item) => item.size > 0)
       .slice(0, 48);
 
-    if (!candidates.length || currentSize <= 0) {
+    if (!candidates.length || currentUsageSize <= 0) {
       return [];
     }
 
@@ -1069,8 +1220,25 @@ const Scanning = () => {
       x1: leaf.x1,
       y1: leaf.y1,
     }));
-  }, [childRows, currentSize, deletedIds, statsMap]);
-  const treeColumnCount = isCloud ? 6 : 7;
+  }, [childRows, currentUsageSize, deletedIds, showsAllocated, statsMap]);
+  const treeColumnCount = showsAllocated ? 7 : 6;
+
+  const sortTreeBy = (key: TreeSortKey) => {
+    if (key !== "name") {
+      setParentPercentMetric(key);
+    }
+    setTreeSort((current) => ({
+      key,
+      direction:
+        current.key === key
+          ? current.direction === "desc"
+            ? "asc"
+            : "desc"
+          : key === "name"
+          ? "asc"
+          : "desc",
+    }));
+  };
 
   const handleTreeScroll = () => {
     if (treeScrollFrameRef.current !== null) {
@@ -1552,7 +1720,11 @@ const Scanning = () => {
               </span>
             )}
           </div>
-          <div className="results-metrics">
+          <div
+            className={`results-metrics ${
+              showsAllocated ? "results-metrics-with-allocated" : ""
+            }`}
+          >
             <div className="metric metric-selected">
               <div className="metric-label">Selected</div>
               <div className="metric-value truncate">
@@ -1565,6 +1737,14 @@ const Scanning = () => {
                 {formatBytes(currentSize)}
               </div>
             </div>
+            {showsAllocated && (
+              <div className="metric">
+                <div className="metric-label">Allocated</div>
+                <div className="metric-value tabular-nums">
+                  {formatBytes(currentStats.allocatedSize)}
+                </div>
+              </div>
+            )}
             <div className="metric">
               <div className="metric-label">Items</div>
               <div className="metric-value tabular-nums">
@@ -1637,13 +1817,60 @@ const Scanning = () => {
             >
               <thead>
                 <tr aria-rowindex={1}>
-                  <TableHeader>Name</TableHeader>
-                  <TableHeader>Parent %</TableHeader>
-                  <TableHeader>Size</TableHeader>
-                  {!isCloud && <TableHeader>Allocated</TableHeader>}
-                  <TableHeader>Items</TableHeader>
-                  <TableHeader>Files</TableHeader>
-                  <TableHeader>Folders</TableHeader>
+                  <SortableTableHeader
+                    sortKey="name"
+                    activeSort={treeSort}
+                    onSort={sortTreeBy}
+                  >
+                    Name
+                  </SortableTableHeader>
+                  <th
+                    className="data-header"
+                    title={`Share of parent by ${
+                      parentPercentMetric === "allocated"
+                        ? "allocated size"
+                        : parentPercentMetric
+                    }`}
+                  >
+                    Parent %
+                  </th>
+                  <SortableTableHeader
+                    sortKey="size"
+                    activeSort={treeSort}
+                    onSort={sortTreeBy}
+                  >
+                    Size
+                  </SortableTableHeader>
+                  {showsAllocated && (
+                    <SortableTableHeader
+                      sortKey="allocated"
+                      activeSort={treeSort}
+                      onSort={sortTreeBy}
+                    >
+                      Allocated
+                    </SortableTableHeader>
+                  )}
+                  <SortableTableHeader
+                    sortKey="items"
+                    activeSort={treeSort}
+                    onSort={sortTreeBy}
+                  >
+                    Items
+                  </SortableTableHeader>
+                  <SortableTableHeader
+                    sortKey="files"
+                    activeSort={treeSort}
+                    onSort={sortTreeBy}
+                  >
+                    Files
+                  </SortableTableHeader>
+                  <SortableTableHeader
+                    sortKey="folders"
+                    activeSort={treeSort}
+                    onSort={sortTreeBy}
+                  >
+                    Folders
+                  </SortableTableHeader>
                 </tr>
               </thead>
               <tbody>
@@ -1669,9 +1896,11 @@ const Scanning = () => {
                     <NumberCell>
                       {formatBytes(statsMap.get(parentNode.id)?.size || 0)}
                     </NumberCell>
-                    {!isCloud && (
+                    {showsAllocated && (
                       <NumberCell>
-                        {formatBytes(statsMap.get(parentNode.id)?.size || 0)}
+                        {formatBytes(
+                          statsMap.get(parentNode.id)?.allocatedSize || 0
+                        )}
                       </NumberCell>
                     )}
                     <NumberCell>
@@ -1703,20 +1932,26 @@ const Scanning = () => {
                       files: 0,
                       folders: 0,
                       size: node.size || 0,
+                      allocatedSize: node.allocatedSize ?? node.size ?? 0,
                     };
                   const stats = deleted ? originalStats : effectiveStats;
                   const parent = parentMap.get(node.id) || currentNode;
-                  const parentEffectiveSize = parent
-                    ? statsMap.get(parent.id)?.size || 0
-                    : currentSize;
-                  const parentOriginalSize = parent
-                    ? originalStatsMap.get(parent.id)?.size || parent.size || 0
-                    : currentSize;
-                  const denominator = deleted
-                    ? parentOriginalSize
-                    : parentEffectiveSize;
+                  const parentEffectiveStats = parent
+                    ? statsMap.get(parent.id) || emptyStats
+                    : currentStats;
+                  const parentOriginalStats = parent
+                    ? originalStatsMap.get(parent.id) || emptyStats
+                    : currentStats;
+                  const denominator = getStatsMetric(
+                    deleted ? parentOriginalStats : parentEffectiveStats,
+                    parentPercentMetric
+                  );
                   const percent =
-                    denominator > 0 ? ((stats.size || 0) / denominator) * 100 : 0;
+                    denominator > 0
+                      ? (getStatsMetric(stats, parentPercentMetric) /
+                          denominator) *
+                        100
+                      : 0;
                   const directory = isDirectory(node);
                   const expanded = expandedIds.has(node.id);
                   return (
@@ -1818,8 +2053,10 @@ const Scanning = () => {
                         <PercentBar percent={percent} />
                       </td>
                       <NumberCell>{formatBytes(stats.size)}</NumberCell>
-                      {!isCloud && (
-                        <NumberCell>{formatBytes(stats.size)}</NumberCell>
+                      {showsAllocated && (
+                        <NumberCell>
+                          {formatBytes(stats.allocatedSize)}
+                        </NumberCell>
                       )}
                       <NumberCell>{stats.items.toLocaleString()}</NumberCell>
                       <NumberCell>{stats.files.toLocaleString()}</NumberCell>
@@ -1894,12 +2131,18 @@ const Scanning = () => {
               <span className="treemap-path">{currentNode?.id || disk}</span>
             </div>
             <span className="treemap-total">
-              {rootSize > 0 ? `${formatBytes(rootSize)} scanned` : ""}
+              {rootUsageSize > 0
+                ? `${formatBytes(rootUsageSize)} ${
+                    showsAllocated ? "allocated" : "scanned"
+                  }`
+                : ""}
             </span>
           </div>
           <div className="treemap-stage">
             {treemapBlocks.map(({ node, index, x0, y0, x1, y1 }) => {
-              const blockSize = statsMap.get(node.id)?.size || 0;
+              const blockSize = showsAllocated
+                ? statsMap.get(node.id)?.allocatedSize || 0
+                : statsMap.get(node.id)?.size || 0;
               const width = x1 - x0;
               const height = y1 - y0;
               const directory = isDirectory(node);

@@ -11,10 +11,12 @@ const mapScanTree = (obj: any, parent: any = null): DiskItem => {
 
   if (obj.children && obj.children.length > 0) {
     obj.isDirectory = true;
-    obj.value = obj.size;
+    obj.value = obj.allocatedSize ?? obj.size;
     obj.children.forEach((child: DiskItem) => mapScanTree(child, obj));
     obj.children.sort(
-      (a: DiskItem, b: DiskItem) => (b.size || 0) - (a.size || 0)
+      (a: DiskItem, b: DiskItem) =>
+        (b.allocatedSize ?? b.size ?? 0) -
+        (a.allocatedSize ?? a.size ?? 0)
     );
   }
 

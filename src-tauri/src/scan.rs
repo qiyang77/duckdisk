@@ -165,7 +165,10 @@ pub fn start(
                 CommandEvent::Stdout(line) => {
                     app_handle.emit_all("scan_finalizing", ()).ok();
                     let error_report = build_error_report(error_records.clone());
-                    match write_scan_result(&line) {
+                    let normalized = normalize_pdu_content(&line);
+                    match normalized.and_then(|content| {
+                        write_scan_result(&content).map_err(|err| err.to_string())
+                    }) {
                         Ok(path) => match write_scan_error_report(&error_report) {
                             Ok(errors_path) => {
                                 app_handle
@@ -329,6 +332,7 @@ pub fn start(
 fn scan_args(ratio: &str) -> Vec<String> {
     vec![
         "--json-output".to_string(),
+        "--quantity=dual-size".to_string(),
         "--progress".to_string(),
         "--deduplicate-hardlinks".to_string(),
         "--omit-json-shared-details".to_string(),
@@ -577,9 +581,48 @@ async fn run_pdu_for_paths(
 
     let error_report = build_error_report(error_records);
     let parsed = stdout
-        .map(|content| serde_json::from_str(&content).map_err(|err| err.to_string()))
+        .map(|content| parse_pdu_content(&content))
         .transpose()?;
     Ok((parsed, error_report))
+}
+
+fn parse_pdu_content(content: &str) -> Result<Value, String> {
+    let mut parsed: Value = serde_json::from_str(content).map_err(|err| err.to_string())?;
+    let tree = parsed
+        .get_mut("tree")
+        .ok_or_else(|| "Scan result has no tree".to_string())?;
+    normalize_pdu_tree(tree)?;
+    parsed["unit"] = Value::String("bytes".to_string());
+    Ok(parsed)
+}
+
+fn normalize_pdu_content(content: &str) -> Result<String, String> {
+    serde_json::to_string(&parse_pdu_content(content)?).map_err(|err| err.to_string())
+}
+
+fn normalize_pdu_tree(node: &mut Value) -> Result<(), String> {
+    let size = node
+        .get("size")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Scan result is missing dual size data".to_string())?;
+    let apparent = size
+        .get("apparent")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "Scan result is missing apparent size data".to_string())?;
+    let allocated = size
+        .get("allocated")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "Scan result is missing allocated size data".to_string())?;
+
+    node["size"] = Value::from(apparent);
+    node["allocatedSize"] = Value::from(allocated);
+
+    if let Some(children) = node.get_mut("children").and_then(Value::as_array_mut) {
+        for child in children {
+            normalize_pdu_tree(child)?;
+        }
+    }
+    Ok(())
 }
 
 fn replace_cached_subtree(
@@ -617,7 +660,7 @@ fn replace_cached_subtree(
     false
 }
 
-fn recalculate_tree_sizes(node: &mut Value) -> u64 {
+fn recalculate_tree_sizes(node: &mut Value) -> (u64, u64) {
     let child_sizes = node
         .get_mut("children")
         .and_then(Value::as_array_mut)
@@ -630,12 +673,18 @@ fn recalculate_tree_sizes(node: &mut Value) -> u64 {
         .unwrap_or_default();
 
     if child_sizes.is_empty() {
-        return tree_size(node);
+        return (tree_size(node), tree_allocated_size(node));
     }
 
-    let size = child_sizes.into_iter().sum::<u64>();
+    let (size, allocated_size) = child_sizes.into_iter().fold(
+        (0_u64, 0_u64),
+        |(size, allocated), (child_size, child_allocated)| {
+            (size + child_size, allocated + child_allocated)
+        },
+    );
     node["size"] = Value::from(size);
-    size
+    node["allocatedSize"] = Value::from(allocated_size);
+    (size, allocated_size)
 }
 
 fn merge_changed_children(
@@ -694,7 +743,9 @@ fn merge_changed_children(
     }
 
     let size = children.iter().map(tree_size).sum::<u64>();
+    let allocated_size = children.iter().map(tree_allocated_size).sum::<u64>();
     root["size"] = Value::from(size);
+    root["allocatedSize"] = Value::from(allocated_size);
     Ok(())
 }
 
@@ -715,6 +766,12 @@ fn top_level_nodes(scan_json: &Value) -> Vec<Value> {
 
 fn tree_size(node: &Value) -> u64 {
     node.get("size").and_then(Value::as_u64).unwrap_or_default()
+}
+
+fn tree_allocated_size(node: &Value) -> u64 {
+    node.get("allocatedSize")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| tree_size(node))
 }
 
 fn child_path(scan_path: &str, total_root: bool, child: &Value) -> Option<String> {
@@ -870,7 +927,7 @@ fn cache_path(
     ratio: &str,
 ) -> Result<PathBuf, String> {
     let mut hasher = DefaultHasher::new();
-    "pdu-0.23.0".hash(&mut hasher);
+    "pdu-0.23.0-dual-size-v2-dataless".hash(&mut hasher);
     scan_path.hash(&mut hasher);
     ratio.hash(&mut hasher);
     let key = hasher.finish();
@@ -915,7 +972,7 @@ fn write_cache_index(
         .filter_map(|path| metadata_entry(&path))
         .collect();
     let index = CacheIndex {
-        version: "duckdisk-cache-index-v1".to_string(),
+        version: "duckdisk-cache-index-v3-dataless".to_string(),
         scan_path: scan_path.to_string(),
         ratio: ratio.to_string(),
         children: entries,
@@ -999,23 +1056,28 @@ mod tests {
         let mut root = json!({
             "name": "(total)",
             "size": 15,
+            "allocatedSize": 24,
             "children": [{
                 "name": "/Users",
                 "size": 10,
+                "allocatedSize": 16,
                 "children": [{
                     "name": "qi",
                     "size": 10,
+                    "allocatedSize": 16,
                     "children": []
                 }]
             }, {
                 "name": "/Applications",
                 "size": 5,
+                "allocatedSize": 8,
                 "children": []
             }]
         });
         let refreshed = json!({
             "name": "/Users/qi",
             "size": 30,
+            "allocatedSize": 40,
             "children": []
         });
 
@@ -1026,7 +1088,26 @@ mod tests {
             &refreshed
         ));
         assert_eq!(root["children"][0]["children"][0]["name"], "qi");
-        assert_eq!(recalculate_tree_sizes(&mut root), 35);
+        assert_eq!(recalculate_tree_sizes(&mut root), (35, 48));
         assert_eq!(root["size"], 35);
+        assert_eq!(root["allocatedSize"], 48);
+    }
+
+    #[test]
+    fn normalizes_dual_size_output() {
+        let content = json!({
+            "unit": "dual-bytes",
+            "tree": {
+                "name": "/tmp/sample",
+                "size": { "allocated": 4096, "apparent": 5 },
+                "children": []
+            }
+        })
+        .to_string();
+
+        let parsed = parse_pdu_content(&content).expect("dual size output should normalize");
+        assert_eq!(parsed["unit"], "bytes");
+        assert_eq!(parsed["tree"]["size"], 5);
+        assert_eq!(parsed["tree"]["allocatedSize"], 4096);
     }
 }

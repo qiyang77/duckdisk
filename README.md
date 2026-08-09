@@ -14,10 +14,10 @@ The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
 Website: https://duckdisk.com/
 
-## What's New in v0.5.9
+## What's New in v0.6.0
 
-- Added Apple notarization for the direct-download build.
-- Added a sandboxed [Mac App Store edition](https://apps.apple.com/app/duckdisk/id6798893880?mt=12).
+- Bug fixes.
+- Added sorting.
 
 ## Screenshots
 

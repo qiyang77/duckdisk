@@ -1,0 +1,174 @@
+diff --git a/src/app.rs b/src/app.rs
+index 42d6e6e..6a5cce4 100644
+--- a/src/app.rs
++++ b/src/app.rs
+@@ -25 +25 @@ use sysinfo::{Disk, Disks};
+-use crate::get_size::{GetBlockCount, GetBlockSize};
++use crate::get_size::{GetBlockCount, GetBlockSize, GetDualSize};
+@@ -123,0 +124,2 @@ impl App {
++                #[cfg(unix)]
++                JsonDataBody::DualBytes(tree) => visualize!(tree, bytes_format),
+@@ -212,0 +215,10 @@ impl App {
++        #[cfg(unix)]
++        impl GetSizeUtils for GetDualSize {
++            const INSTANCE: Self = GetDualSize;
++            const QUANTITY: Quantity = Quantity::DualSize;
++            #[inline]
++            fn formatter(bytes_format: BytesFormat) -> BytesFormat {
++                bytes_format
++            }
++        }
++
+@@ -337,0 +350,4 @@ impl App {
++            #[cfg(unix)] GetDualSize, false, false;
++            #[cfg(unix)] GetDualSize, true, false;
++            #[cfg(unix)] GetDualSize, false, true;
++            #[cfg(unix)] GetDualSize, true, true;
+diff --git a/src/args/quantity.rs b/src/args/quantity.rs
+index a51225d..6305cd9 100644
+--- a/src/args/quantity.rs
++++ b/src/args/quantity.rs
+@@ -14,0 +15,3 @@ pub enum Quantity {
++    /// Measure apparent and allocated byte sizes in one pass.
++    #[cfg(unix)]
++    DualSize,
+diff --git a/src/get_size.rs b/src/get_size.rs
+index 235fef8..02e6151 100644
+--- a/src/get_size.rs
++++ b/src/get_size.rs
+@@ -5 +5 @@ use std::fs::Metadata;
+-use super::size::Blocks;
++use super::size::{Blocks, DualBytes};
+@@ -7,0 +8,2 @@ use std::os::unix::prelude::MetadataExt;
++#[cfg(target_os = "macos")]
++use std::os::macos::fs::MetadataExt as MacMetadataExt;
+@@ -38,0 +41,31 @@ impl GetSize for GetBlockSize {
++/// Returns both apparent and allocated byte counts from one metadata lookup.
++#[cfg(unix)]
++#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
++pub struct GetDualSize;
++#[cfg(unix)]
++impl GetSize for GetDualSize {
++    type Size = DualBytes;
++
++    #[inline]
++    fn get_size(&self, metadata: &Metadata) -> Self::Size {
++        let allocated = metadata.blocks() * 512;
++        #[cfg(target_os = "macos")]
++        const UF_DATALESS: u32 = 0x4000_0000;
++        #[cfg(target_os = "macos")]
++        let apparent = if metadata.st_flags() & UF_DATALESS != 0
++            || (allocated == 0 && metadata.len() > 0)
++        {
++            0
++        } else {
++            metadata.len()
++        };
++        #[cfg(not(target_os = "macos"))]
++        let apparent = metadata.len();
++
++        DualBytes {
++            allocated,
++            apparent,
++        }
++    }
++}
++
+diff --git a/src/json_data.rs b/src/json_data.rs
+index eed2b09..7135b65 100644
+--- a/src/json_data.rs
++++ b/src/json_data.rs
+@@ -11,0 +12,2 @@ use crate::{
++#[cfg(unix)]
++use crate::size::DualBytes;
+@@ -85,0 +88,3 @@ pub enum JsonDataBody {
++    /// Tree containing both apparent and allocated byte counts.
++    #[cfg(unix)]
++    DualBytes(JsonTree<DualBytes>),
+diff --git a/src/size.rs b/src/size.rs
+index 34224b8..89f9a73 100644
+--- a/src/size.rs
++++ b/src/size.rs
+@@ -129,0 +130,82 @@ newtype!(
++
++/// Apparent and allocated byte counts collected from one metadata lookup.
++///
++/// Ordering and scalar conversion intentionally use allocated bytes so pdu's
++/// sorting, progress, and minimum-ratio behavior continue to describe physical
++/// disk usage.
++#[cfg(unix)]
++#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
++#[derive(Add, AddAssign, Sub, SubAssign, Sum)]
++#[cfg_attr(feature = "json", derive(Deserialize, Serialize))]
++pub struct DualBytes {
++    pub allocated: u64,
++    pub apparent: u64,
++}
++
++#[cfg(unix)]
++impl From<u64> for DualBytes {
++    fn from(value: u64) -> Self {
++        Self {
++            allocated: value,
++            apparent: value,
++        }
++    }
++}
++
++#[cfg(unix)]
++impl From<DualBytes> for u64 {
++    fn from(value: DualBytes) -> Self {
++        value.allocated
++    }
++}
++
++#[cfg(unix)]
++impl Mul<DualBytes> for DualBytes {
++    type Output = Self;
++
++    fn mul(self, rhs: DualBytes) -> Self::Output {
++        Self {
++            allocated: self.allocated * rhs.allocated,
++            apparent: self.apparent * rhs.apparent,
++        }
++    }
++}
++
++#[cfg(unix)]
++macro_rules! impl_dual_mul {
++    ($($num_type:ident)+) => {
++        $(
++            impl Mul<$num_type> for DualBytes {
++                type Output = Self;
++
++                fn mul(self, rhs: $num_type) -> Self::Output {
++                    Self {
++                        allocated: self.allocated * rhs as u64,
++                        apparent: self.apparent * rhs as u64,
++                    }
++                }
++            }
++
++            impl MulAssign<$num_type> for DualBytes {
++                fn mul_assign(&mut self, rhs: $num_type) {
++                    self.allocated *= rhs as u64;
++                    self.apparent *= rhs as u64;
++                }
++            }
++        )+
++    };
++}
++
++#[cfg(unix)]
++impl_dual_mul!(usize u8 u16 u32 u64);
++
++#[cfg(unix)]
++impl Size for DualBytes {
++    type Inner = Self;
++    type DisplayFormat = BytesFormat;
++    type DisplayOutput = bytes_format::Output;
++
++    fn display(self, format: Self::DisplayFormat) -> Self::DisplayOutput {
++        format.format(self.allocated)
++    }
++}
