@@ -6,6 +6,7 @@
     "allowlist": {
       "dialog": {
         "ask": true,
+        "confirm": true,
         "open": true
       }
     },
