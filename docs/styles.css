@@ -280,7 +280,7 @@ h3 {
 }
 
 .hero-actions {
-  align-items: flex-start;
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
@@ -291,8 +291,9 @@ h3 {
   display: inline-flex;
   flex: 0 0 auto;
   justify-content: center;
+  height: 48px;
   min-height: 48px;
-  padding: 4px 0;
+  padding: 0;
   transition: opacity 140ms ease, transform 140ms ease;
 }
 
@@ -706,7 +707,7 @@ h3 {
 }
 
 .install-actions {
-  align-items: flex-start;
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
@@ -831,7 +832,7 @@ code {
 }
 
 .final-cta-actions {
-  align-items: flex-start;
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
