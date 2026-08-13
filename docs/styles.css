@@ -286,23 +286,6 @@ h3 {
   gap: 12px;
 }
 
-.store-download-option {
-  align-items: center;
-  display: flex;
-  flex: 0 0 auto;
-  flex-direction: column;
-}
-
-.store-note {
-  color: var(--paper-muted);
-  display: block;
-  font-size: 11px;
-  font-weight: 650;
-  line-height: 1.3;
-  margin-top: 3px;
-  text-align: center;
-}
-
 .app-store-badge {
   align-items: center;
   display: inline-flex;
@@ -333,6 +316,13 @@ h3 {
   font-size: 13px;
   font-weight: 600;
   margin: 16px 0 0;
+}
+
+.download-note {
+  color: var(--paper-muted);
+  font-size: 12px;
+  font-weight: 650;
+  margin: 6px 0 0;
 }
 
 .release-highlight {
@@ -848,10 +838,6 @@ code {
   justify-content: flex-end;
 }
 
-.final-cta .store-note {
-  color: #17495a;
-}
-
 .site-footer {
   background: #0b0d0a;
   color: var(--paper-muted);
@@ -1075,8 +1061,9 @@ code {
   .hero-actions .button,
   .install-actions .button,
   .final-cta-actions .button,
-  .store-download-option,
-  .store-download-option .app-store-badge {
+  .hero-actions .app-store-badge,
+  .install-actions .app-store-badge,
+  .final-cta-actions .app-store-badge {
     width: 100%;
   }
 
