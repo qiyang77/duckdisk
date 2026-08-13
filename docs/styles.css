@@ -286,6 +286,13 @@ h3 {
   gap: 12px;
 }
 
+.hero-actions > .button,
+.install-actions > .button,
+.final-cta-actions > .button {
+  height: 48px;
+  min-height: 48px;
+}
+
 .app-store-badge {
   align-items: center;
   display: inline-flex;
