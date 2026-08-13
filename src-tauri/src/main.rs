@@ -118,6 +118,7 @@ fn main() {
         clear_ssh_cached_scan_result,
         read_ssh_scan_result,
         delete_ssh_items,
+        request_app_review,
         show_in_folder
     ]);
 
@@ -137,6 +138,31 @@ fn main() {
 #[tauri::command]
 fn inspect_ssh_host_key(host: String, port: u16) -> Result<String, String> {
     ssh::inspect_host_key(&host, port)
+}
+
+#[cfg(feature = "mas")]
+#[link(name = "StoreKit", kind = "framework")]
+extern "C" {
+    #[link_name = "OBJC_CLASS_$_SKStoreReviewController"]
+    static SK_STORE_REVIEW_CONTROLLER: objc::runtime::Class;
+}
+
+#[cfg(feature = "mas")]
+#[tauri::command]
+fn request_app_review(app_handle: tauri::AppHandle) -> Result<(), String> {
+    app_handle
+        .run_on_main_thread(|| unsafe {
+            use objc::{msg_send, sel, sel_impl};
+
+            let _: () = msg_send![&SK_STORE_REVIEW_CONTROLLER, requestReview];
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(all(not(feature = "mas"), not(feature = "google-drive")))]
+#[tauri::command]
+fn request_app_review() -> Result<(), String> {
+    Err("App Store ratings are only available in the Mac App Store edition.".to_string())
 }
 
 #[cfg(feature = "direct")]

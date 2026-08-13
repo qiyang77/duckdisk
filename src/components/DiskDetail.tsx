@@ -312,6 +312,56 @@ const emptyScanErrorReport = {
 };
 const credentialNoticeKey = (source: string) =>
   `duckdisk-${source}-keychain-notice-seen`;
+const reviewFirstSuccessfulScanKey = "duckdisk-review-first-successful-scan-at";
+const reviewSuccessfulScanCountKey = "duckdisk-review-successful-scan-count";
+const reviewLastRequestKey = "duckdisk-review-last-request-at";
+const reviewMinimumSuccessfulScans = 3;
+const reviewMinimumAgeMs = 3 * 24 * 60 * 60 * 1000;
+const reviewRequestCooldownMs = 120 * 24 * 60 * 60 * 1000;
+
+const recordSuccessfulScanForReview = async () => {
+  if (!isMacAppStore) return;
+
+  const now = Date.now();
+  const storedFirstSuccessfulScan = Number(
+    localStorage.getItem(reviewFirstSuccessfulScanKey)
+  );
+  const hasStoredFirstSuccessfulScan =
+    Number.isFinite(storedFirstSuccessfulScan) && storedFirstSuccessfulScan > 0;
+  const firstSuccessfulScanAt =
+    hasStoredFirstSuccessfulScan
+      ? storedFirstSuccessfulScan
+      : now;
+  if (!hasStoredFirstSuccessfulScan) {
+    localStorage.setItem(reviewFirstSuccessfulScanKey, String(now));
+  }
+
+  const previousCount = Number(
+    localStorage.getItem(reviewSuccessfulScanCountKey)
+  );
+  const successfulScanCount =
+    (Number.isFinite(previousCount) && previousCount > 0 ? previousCount : 0) + 1;
+  localStorage.setItem(
+    reviewSuccessfulScanCountKey,
+    String(successfulScanCount)
+  );
+
+  const lastRequest = Number(localStorage.getItem(reviewLastRequestKey));
+  const requestedRecently =
+    Number.isFinite(lastRequest) &&
+    lastRequest > 0 &&
+    now - lastRequest < reviewRequestCooldownMs;
+  if (
+    successfulScanCount < reviewMinimumSuccessfulScans ||
+    now - firstSuccessfulScanAt < reviewMinimumAgeMs ||
+    requestedRecently
+  ) {
+    return;
+  }
+
+  await invoke("request_app_review");
+  localStorage.setItem(reviewLastRequestKey, String(now));
+};
 
 const totalScanIssues = (counts: ScanErrorCounts) =>
   counts.operationNotPermitted +
@@ -689,6 +739,7 @@ const Scanning = () => {
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
   const treeViewportRef = useRef<HTMLDivElement | null>(null);
   const treeScrollFrameRef = useRef<number | null>(null);
+  const reviewRecordedForScan = useRef(false);
   const suppressClickUntil = useRef(0);
   const [view, setView] = useState<"loading" | "disk">("loading");
   const [status, setStatus] = useState<ScanStatus | null>(null);
@@ -759,6 +810,25 @@ const Scanning = () => {
     observer.observe(viewport);
     return () => observer.disconnect();
   }, [view]);
+
+  useEffect(() => {
+    if (
+      !isMacAppStore ||
+      view !== "disk" ||
+      !rootNode ||
+      reviewRecordedForScan.current
+    ) {
+      return;
+    }
+
+    reviewRecordedForScan.current = true;
+    const timer = window.setTimeout(() => {
+      void recordSuccessfulScanForReview().catch((error) =>
+        console.warn("Could not request an App Store rating", error)
+      );
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [rootNode, view]);
 
   useEffect(
     () => () => {
@@ -927,6 +997,7 @@ const Scanning = () => {
     };
 
     const start = async () => {
+      reviewRecordedForScan.current = false;
       setView("loading");
       setStatus(null);
       setScanError(null);
