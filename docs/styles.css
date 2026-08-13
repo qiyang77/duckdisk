@@ -280,9 +280,35 @@ h3 {
 }
 
 .hero-actions {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+}
+
+.app-store-badge {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  justify-content: center;
+  min-height: 48px;
+  padding: 4px 0;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.app-store-badge:hover {
+  opacity: 0.88;
+  transform: translateY(-1px);
+}
+
+.app-store-badge:active {
+  transform: translateY(0);
+}
+
+.app-store-badge img {
+  display: block;
+  height: 48px;
+  width: auto;
 }
 
 .download-meta {
@@ -673,6 +699,7 @@ h3 {
 }
 
 .install-actions {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
@@ -771,7 +798,7 @@ code {
   grid-template-columns: auto 1fr auto;
 }
 
-.final-cta img {
+.final-cta-icon {
   border-radius: 8px;
 }
 
@@ -794,6 +821,14 @@ code {
 .final-cta .button-primary:hover {
   background: #292e25;
   border-color: #292e25;
+}
+
+.final-cta-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
 }
 
 .site-footer {
@@ -1010,13 +1045,18 @@ code {
   }
 
   .hero-actions,
-  .install-actions {
+  .install-actions,
+  .final-cta-actions {
     align-items: stretch;
     flex-direction: column;
   }
 
   .hero-actions .button,
-  .install-actions .button {
+  .install-actions .button,
+  .final-cta-actions .button,
+  .hero-actions .app-store-badge,
+  .install-actions .app-store-badge,
+  .final-cta-actions .app-store-badge {
     width: 100%;
   }
 
@@ -1126,7 +1166,7 @@ code {
     grid-template-columns: 76px 1fr;
   }
 
-  .final-cta img {
+  .final-cta-icon {
     height: 76px;
     width: 76px;
   }
@@ -1135,7 +1175,7 @@ code {
     font-size: 28px;
   }
 
-  .final-cta .button {
+  .final-cta-actions {
     grid-column: 1 / -1;
     width: 100%;
   }

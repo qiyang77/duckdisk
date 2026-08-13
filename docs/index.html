@@ -45,7 +45,11 @@
         "url": "https://duckdisk.com/",
         "image": "https://duckdisk.com/assets/duckdisk-icon.png?v=0.6.0",
         "downloadUrl": "https://github.com/qiyang77/duckdisk/releases/download/v0.6.0/DuckDisk_0.6.0_arm64.dmg",
-        "installUrl": "https://github.com/qiyang77/duckdisk/releases/tag/v0.6.0",
+        "installUrl": "https://apps.apple.com/app/duckdisk/id6798893880?mt=12",
+        "sameAs": [
+          "https://apps.apple.com/app/duckdisk/id6798893880?mt=12",
+          "https://github.com/qiyang77/duckdisk"
+        ],
         "codeRepository": "https://github.com/qiyang77/duckdisk",
         "license": "https://github.com/qiyang77/duckdisk/blob/main/LICENSE",
         "author": {
@@ -100,11 +104,23 @@
           </p>
           <div class="hero-actions">
             <a
+              class="app-store-badge"
+              href="https://apps.apple.com/app/duckdisk/id6798893880?mt=12"
+              aria-label="Download DuckDisk on the Mac App Store"
+            >
+              <img
+                src="assets/mac-app-store-badge.svg"
+                width="156"
+                height="40"
+                alt="Download on the Mac App Store"
+              >
+            </a>
+            <a
               class="button button-primary"
               href="https://github.com/qiyang77/duckdisk/releases/download/v0.6.0/DuckDisk_0.6.0_arm64.dmg"
               data-download
             >
-              Download for macOS
+              Direct Download
             </a>
             <a
               class="button button-secondary"
@@ -114,7 +130,7 @@
             </a>
           </div>
           <p class="download-meta">
-            v0.6.0 · Apple Silicon arm64 · Free and open source
+            Mac App Store or notarized DMG · Apple Silicon arm64 · Free and open source
           </p>
           <p class="release-highlight">
             <strong>New in 0.6.0</strong>
@@ -325,15 +341,15 @@
         <div class="shell">
           <div class="section-heading install-heading">
             <p class="eyebrow">Install DuckDisk</p>
-            <h2>From download to first scan.</h2>
+            <h2>Choose your preferred install.</h2>
           </div>
 
           <ol class="install-steps">
             <li>
               <span>1</span>
               <div>
-                <h3>Download the DMG</h3>
-                <p>Get the Apple Silicon build from the v0.6.0 release.</p>
+                <h3>Choose App Store or DMG</h3>
+                <p>Install the sandboxed edition from Apple, or get the full direct build.</p>
               </div>
             </li>
             <li>
@@ -354,11 +370,23 @@
 
           <div class="install-actions">
             <a
+              class="app-store-badge"
+              href="https://apps.apple.com/app/duckdisk/id6798893880?mt=12"
+              aria-label="Download DuckDisk on the Mac App Store"
+            >
+              <img
+                src="assets/mac-app-store-badge.svg"
+                width="156"
+                height="40"
+                alt="Download on the Mac App Store"
+              >
+            </a>
+            <a
               class="button button-primary"
               href="https://github.com/qiyang77/duckdisk/releases/download/v0.6.0/DuckDisk_0.6.0_arm64.dmg"
               data-download
             >
-              Download DuckDisk v0.6.0
+              Direct Download v0.6.0
             </a>
             <a
               class="button button-secondary"
@@ -369,8 +397,8 @@
           </div>
 
           <p class="signing-note">
-            Version 0.6.0 is Developer ID signed and notarized by Apple.
-            macOS can verify the downloaded app before its first launch.
+            The Mac App Store edition is sandboxed and uses Apple-managed updates.
+            The direct edition includes Google Drive and is Developer ID signed and notarized by Apple.
           </p>
         </div>
       </section>
@@ -427,18 +455,32 @@
 
       <section class="final-cta">
         <div class="shell final-cta-inner">
-          <img src="assets/duckdisk-icon.png?v=0.6.0" width="112" height="112" alt="">
+          <img class="final-cta-icon" src="assets/duckdisk-icon.png?v=0.6.0" width="112" height="112" alt="">
           <div>
             <p class="eyebrow">Make space visible</p>
             <h2>Find the files worth acting on.</h2>
           </div>
-          <a
-            class="button button-primary"
-            href="https://github.com/qiyang77/duckdisk/releases/download/v0.6.0/DuckDisk_0.6.0_arm64.dmg"
-            data-download
-          >
-            Download for macOS
-          </a>
+          <div class="final-cta-actions">
+            <a
+              class="app-store-badge"
+              href="https://apps.apple.com/app/duckdisk/id6798893880?mt=12"
+              aria-label="Download DuckDisk on the Mac App Store"
+            >
+              <img
+                src="assets/mac-app-store-badge.svg"
+                width="156"
+                height="40"
+                alt="Download on the Mac App Store"
+              >
+            </a>
+            <a
+              class="button button-primary"
+              href="https://github.com/qiyang77/duckdisk/releases/download/v0.6.0/DuckDisk_0.6.0_arm64.dmg"
+              data-download
+            >
+              Direct Download
+            </a>
+          </div>
         </div>
       </section>
     </main>
@@ -453,6 +495,7 @@
           </div>
         </div>
         <div class="footer-links">
+          <a href="https://apps.apple.com/app/duckdisk/id6798893880?mt=12">Mac App Store</a>
           <a href="https://github.com/qiyang77/duckdisk">Source</a>
           <a href="https://github.com/qiyang77/duckdisk/releases">Releases</a>
           <a href="https://github.com/qiyang77/duckdisk/issues">Issues</a>
@@ -463,6 +506,7 @@
       </div>
       <div class="shell footer-bottom">
         <span>Copyright © 2026 Qi Yang. AGPL-3.0-or-later.</span>
+        <span>Apple and the Apple logo are trademarks of Apple Inc. Mac App Store is a service mark of Apple Inc.</span>
       </div>
     </footer>
   </body>
