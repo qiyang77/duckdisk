@@ -1189,6 +1189,11 @@ const Scanning = () => {
   );
   const childRows = useMemo(() => getChildren(currentNode), [currentNode]);
   const compareTreeNodes = useMemo(() => {
+    const getSortStats = (node: DiskItem) =>
+      isDeletedPath(node.id, deletedIds)
+        ? originalStatsMap.get(node.id) || emptyStats
+        : statsMap.get(node.id) || emptyStats;
+
     return (a: DiskItem, b: DiskItem) => {
       const comparison =
         treeSort.key === "name"
@@ -1196,8 +1201,8 @@ const Scanning = () => {
               numeric: true,
               sensitivity: "base",
             })
-          : getStatsMetric(statsMap.get(a.id) || emptyStats, treeSort.key) -
-            getStatsMetric(statsMap.get(b.id) || emptyStats, treeSort.key);
+          : getStatsMetric(getSortStats(a), treeSort.key) -
+            getStatsMetric(getSortStats(b), treeSort.key);
       const directedComparison =
         treeSort.direction === "asc" ? comparison : -comparison;
 
@@ -1209,7 +1214,7 @@ const Scanning = () => {
         })
       );
     };
-  }, [statsMap, treeSort.direction, treeSort.key]);
+  }, [deletedIds, originalStatsMap, statsMap, treeSort.direction, treeSort.key]);
   const rows = useMemo(
     () => buildVisibleRows(childRows, expandedIds, compareTreeNodes),
     [childRows, compareTreeNodes, expandedIds]
