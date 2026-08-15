@@ -13,6 +13,16 @@ on:
         required: false
         default: false
         type: boolean
+      submit:
+        description: Create the App Store version, attach the build, and submit it for review
+        required: false
+        default: false
+        type: boolean
+      whats_new:
+        description: Text to use for What's New in every App Store localization
+        required: false
+        default: "Fixed several bugs."
+        type: string
 
 permissions:
   contents: read
@@ -116,6 +126,22 @@ jobs:
             --type macos \
             --apiKey "$APP_STORE_CONNECT_KEY_ID" \
             --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+
+      - name: Submit version to App Review
+        if: inputs.submit
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          MAS_SUBMIT_BUILD_NUMBER: ${{ inputs.build_number }}
+          MAS_WHATS_NEW: ${{ inputs.whats_new }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          bash scripts/submit-mac-app-store.sh \
+            "$version" \
+            "$MAS_SUBMIT_BUILD_NUMBER" \
+            "$MAS_WHATS_NEW"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
