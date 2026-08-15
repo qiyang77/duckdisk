@@ -35,23 +35,28 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Rust setup
+        if: inputs.upload || !inputs.submit
         uses: dtolnay/rust-toolchain@stable
 
       - name: Rust cache
+        if: inputs.upload || !inputs.submit
         uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
 
       - name: Node setup
+        if: inputs.upload || !inputs.submit
         uses: actions/setup-node@v4
         with:
           node-version: "lts/*"
           cache: npm
 
       - name: Install dependencies
+        if: inputs.upload || !inputs.submit
         run: npm ci
 
       - name: Import Mac App Store certificates
+        if: inputs.upload || !inputs.submit
         env:
           MAS_APP_CERTIFICATE: ${{ secrets.MAS_APP_CERTIFICATE }}
           MAS_APP_CERTIFICATE_PASSWORD: ${{ secrets.MAS_APP_CERTIFICATE_PASSWORD }}
@@ -76,6 +81,7 @@ jobs:
           rm -f "$app_certificate" "$installer_certificate"
 
       - name: Build and sign Mac App Store package
+        if: inputs.upload || !inputs.submit
         env:
           MAS_BUILD_NUMBER: ${{ inputs.build_number }}
           MAS_APP_SIGNING_IDENTITY: ${{ secrets.MAS_APP_SIGNING_IDENTITY }}
@@ -86,15 +92,17 @@ jobs:
         run: npm run release:macos-store
 
       - name: Locate package
+        if: inputs.upload || !inputs.submit
         shell: bash
         run: |
           set -euo pipefail
-          version="$(node -p "require('./package.json').version")"
+          version="$(jq -r .version package.json)"
           package_path="src-tauri/target/mas-store/DuckDisk-${version}-MAS.pkg"
           test -f "$package_path"
           echo "MAS_PACKAGE_PATH=$package_path" >> "$GITHUB_ENV"
 
       - name: Validate package with App Store Connect
+        if: inputs.upload || !inputs.submit
         env:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
@@ -132,18 +140,25 @@ jobs:
         env:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
           MAS_SUBMIT_BUILD_NUMBER: ${{ inputs.build_number }}
           MAS_WHATS_NEW: ${{ inputs.whats_new }}
         shell: bash
         run: |
           set -euo pipefail
-          version="$(node -p "require('./package.json').version")"
+          key_dir="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$key_dir"
+          key_path="$key_dir/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          version="$(jq -r .version package.json)"
           bash scripts/submit-mac-app-store.sh \
             "$version" \
             "$MAS_SUBMIT_BUILD_NUMBER" \
             "$MAS_WHATS_NEW"
 
       - name: Upload workflow artifact
+        if: inputs.upload || !inputs.submit
         uses: actions/upload-artifact@v4
         with:
           name: DuckDisk-Mac-App-Store
