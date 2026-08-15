@@ -1052,6 +1052,56 @@ a:focus-visible,
   opacity: 0.4;
 }
 
+.tree-toggle-loading:disabled {
+  border-color: rgba(74, 183, 221, 0.72);
+  background: rgba(45, 135, 168, 0.18);
+  color: #68c9e8;
+  opacity: 1;
+}
+
+.data-row-refreshing {
+  background: linear-gradient(
+    90deg,
+    rgba(42, 137, 171, 0.13),
+    rgba(42, 137, 171, 0.03) 72%,
+    transparent
+  );
+}
+
+.tree-name-content {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.tree-name-indent,
+.tree-toggle-spacer {
+  flex: 0 0 auto;
+}
+
+.tree-toggle-spacer {
+  width: 24px;
+  height: 17px;
+}
+
+.tree-name-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.tree-loading-label {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  color: #68c9e8;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
 .item-type-icon {
   display: inline-block;
   flex: 0 0 auto;

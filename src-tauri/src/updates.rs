@@ -7,16 +7,13 @@ const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/qiyang77/duckdisk
 #[derive(Deserialize)]
 struct GitHubRelease {
     tag_name: String,
-    html_url: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCheck {
-    current_version: String,
     latest_version: String,
     update_available: bool,
-    release_url: String,
 }
 
 pub async fn check(current_version: &str) -> Result<UpdateCheck, String> {
@@ -39,17 +36,10 @@ pub async fn check(current_version: &str) -> Result<UpdateCheck, String> {
         .map_err(|err| format!("GitHub returned an invalid release response: {err}"))?;
     let current = parse_version(current_version)?;
     let latest = parse_version(&release.tag_name)?;
-    let update_available = latest > current;
 
     Ok(UpdateCheck {
-        current_version: current.to_string(),
         latest_version: latest.to_string(),
-        update_available,
-        release_url: if update_available {
-            release.html_url
-        } else {
-            String::new()
-        },
+        update_available: latest > current,
     })
 }
 

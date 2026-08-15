@@ -80,14 +80,58 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
         shell: bash
         run: |
           set -euo pipefail
           npm run release:macos
           version="$(node -p "require('./package.json').version")"
           dmg="src-tauri/target/release/bundle/dmg/DuckDisk_${version}_arm64.dmg"
-          test -f "$dmg"
+          updater="src-tauri/target/release/bundle/updater/DuckDisk_${version}_arm64.app.tar.gz"
+          updater_signature="$updater.sig"
+          test -f "$dmg" && test -f "$updater" && test -f "$updater_signature"
           echo "DMG_PATH=$dmg" >> "$GITHUB_ENV"
+          echo "UPDATER_PATH=$updater" >> "$GITHUB_ENV"
+          echo "UPDATER_SIGNATURE_PATH=$updater_signature" >> "$GITHUB_ENV"
+
+      - name: Prepare updater manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          expected_tag="v${version}"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            if [[ "$GITHUB_REF_NAME" != "$expected_tag" ]]; then
+              echo "Release tag $GITHUB_REF_NAME does not match package version $version" >&2
+              exit 1
+            fi
+            release_tag="$GITHUB_REF_NAME"
+          else
+            release_tag="$expected_tag"
+          fi
+          updater_name="$(basename "$UPDATER_PATH")"
+          updater_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/${updater_name}"
+          latest_json="src-tauri/target/release/bundle/updater/latest.json"
+          signature="$(cat "$UPDATER_SIGNATURE_PATH")"
+          jq -n \
+            --arg version "$version" \
+            --arg pub_date "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            --arg signature "$signature" \
+            --arg url "$updater_url" \
+            '{
+              version: $version,
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-aarch64": {
+                  signature: $signature,
+                  url: $url
+                }
+              }
+            }' > "$latest_json"
+          jq -e '.version and .platforms["darwin-aarch64"].signature and .platforms["darwin-aarch64"].url' \
+            "$latest_json" >/dev/null
+          echo "UPDATER_MANIFEST_PATH=$latest_json" >> "$GITHUB_ENV"
 
       - name: Upload release asset
         if: startsWith(github.ref, 'refs/tags/')
@@ -140,13 +184,22 @@ jobs:
             } >> "$release_notes_file"
             gh release edit "$GITHUB_REF_NAME" --notes-file "$release_notes_file"
           fi
-          gh release upload "$GITHUB_REF_NAME" "$DMG_PATH" --clobber
+          gh release upload "$GITHUB_REF_NAME" \
+            "$DMG_PATH" \
+            "$UPDATER_PATH" \
+            "$UPDATER_SIGNATURE_PATH" \
+            "$UPDATER_MANIFEST_PATH" \
+            --clobber
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DuckDisk-arm64-dmg
-          path: ${{ env.DMG_PATH }}
+          name: DuckDisk-arm64-release
+          path: |
+            ${{ env.DMG_PATH }}
+            ${{ env.UPDATER_PATH }}
+            ${{ env.UPDATER_SIGNATURE_PATH }}
+            ${{ env.UPDATER_MANIFEST_PATH }}
 
       - name: Remove signing keychain
         if: always()

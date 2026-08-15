@@ -927,7 +927,7 @@ fn cache_path(
     ratio: &str,
 ) -> Result<PathBuf, String> {
     let mut hasher = DefaultHasher::new();
-    "pdu-0.23.0-dual-size-v2-dataless".hash(&mut hasher);
+    "pdu-0.23.0-dual-size-v3-node-types".hash(&mut hasher);
     scan_path.hash(&mut hasher);
     ratio.hash(&mut hasher);
     let key = hasher.finish();
@@ -1100,6 +1100,7 @@ mod tests {
             "tree": {
                 "name": "/tmp/sample",
                 "size": { "allocated": 4096, "apparent": 5 },
+                "isDirectory": true,
                 "children": []
             }
         })
@@ -1109,5 +1110,6 @@ mod tests {
         assert_eq!(parsed["unit"], "bytes");
         assert_eq!(parsed["tree"]["size"], 5);
         assert_eq!(parsed["tree"]["allocatedSize"], 4096);
+        assert_eq!(parsed["tree"]["isDirectory"], true);
     }
 }

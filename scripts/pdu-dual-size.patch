@@ -172,3 +172,83 @@ index 34224b8..89f9a73 100644
 +        format.format(self.allocated)
 +    }
 +}
+diff --git a/src/data_tree.rs b/src/data_tree.rs
+index 6c68ff6..542c28b 100644
+--- a/src/data_tree.rs
++++ b/src/data_tree.rs
+@@ -27,0 +28 @@ pub struct DataTree<Name, Size: size::Size> {
++    is_directory: bool,
+diff --git a/src/data_tree/constructors.rs b/src/data_tree/constructors.rs
+index 3b95367..491408a 100644
+--- a/src/data_tree/constructors.rs
++++ b/src/data_tree/constructors.rs
+@@ -11,0 +12 @@ impl<Name, Size: size::Size> DataTree<Name, Size> {
++            is_directory: true,
+@@ -21,0 +23 @@ impl<Name, Size: size::Size> DataTree<Name, Size> {
++            is_directory: false,
+diff --git a/src/data_tree/reflection.rs b/src/data_tree/reflection.rs
+index 8288b4b..dcd8d09 100644
+--- a/src/data_tree/reflection.rs
++++ b/src/data_tree/reflection.rs
+@@ -37,0 +38,3 @@ pub struct Reflection<Name, Size: size::Size> {
++    /// Whether this filesystem node is a directory, including empty and truncated directories.
++    #[cfg_attr(feature = "json", serde(rename = "isDirectory", default))]
++    pub is_directory: bool,
+diff --git a/src/data_tree/reflection/convert.rs b/src/data_tree/reflection/convert.rs
+index ff36080..a6b19e7 100644
+--- a/src/data_tree/reflection/convert.rs
++++ b/src/data_tree/reflection/convert.rs
+@@ -8,0 +9 @@ impl<Name, Size: size::Size> From<DataTree<Name, Size>> for Reflection<Name, Siz
++            is_directory,
+@@ -14,0 +16 @@ impl<Name, Size: size::Size> From<DataTree<Name, Size>> for Reflection<Name, Siz
++            is_directory,
+diff --git a/src/data_tree/reflection/par_methods.rs b/src/data_tree/reflection/par_methods.rs
+index 786c1da..76f5f37 100644
+--- a/src/data_tree/reflection/par_methods.rs
++++ b/src/data_tree/reflection/par_methods.rs
+@@ -15,0 +16 @@ where
++            is_directory,
+@@ -44,0 +46 @@ where
++            is_directory,
+@@ -62,0 +65 @@ where
++            is_directory,
+@@ -72,0 +76 @@ where
++            is_directory,
+diff --git a/src/fs_tree_builder.rs b/src/fs_tree_builder.rs
+index 21b0902..99489ca 100644
+--- a/src/fs_tree_builder.rs
++++ b/src/fs_tree_builder.rs
+@@ -116,0 +117 @@ where
++                            is_directory: false,
+@@ -145,0 +147 @@ where
++                                is_directory: true,
+@@ -167 +169,5 @@ where
+-                Info { size, children }
++                Info {
++                    size,
++                    is_directory: is_dir,
++                    children,
++                }
+diff --git a/src/tree_builder.rs b/src/tree_builder.rs
+index 5f82572..327bf03 100644
+--- a/src/tree_builder.rs
++++ b/src/tree_builder.rs
+@@ -49 +49,5 @@ where
+-        let Info { size, children } = get_info(&path);
++        let Info {
++            size,
++            is_directory,
++            children,
++        } = get_info(&path);
+@@ -63 +67,3 @@ where
+-        if max_depth > 0 {
++        if !is_directory {
++            DataTree::file(name, size)
++        } else if max_depth > 0 {
+diff --git a/src/tree_builder/info.rs b/src/tree_builder/info.rs
+index c6a72d2..38eb084 100644
+--- a/src/tree_builder/info.rs
++++ b/src/tree_builder/info.rs
+@@ -9,0 +10,2 @@ pub struct Info<Name, Size: size::Size> {
++    /// Whether the path represented by this node is a directory.
++    pub is_directory: bool,

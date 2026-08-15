@@ -8,6 +8,9 @@
         "ask": true,
         "confirm": true,
         "open": true
+      },
+      "process": {
+        "relaunch": false
       }
     },
     "bundle": {
@@ -21,6 +24,12 @@
       "targets": [
         "app"
       ]
+    },
+    "updater": {
+      "active": false,
+      "endpoints": [],
+      "dialog": false,
+      "pubkey": ""
     },
     "macOSPrivateApi": false,
     "windows": [

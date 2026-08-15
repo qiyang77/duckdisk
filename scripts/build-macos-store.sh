@@ -30,9 +30,14 @@ ln -s "$root_dir/node_modules" "$store_source_dir/node_modules"
 # not alter the normal website-distribution manifest or its Google integration.
 perl -0pi -e 's/default = \["custom-protocol", "direct"\]/default = ["custom-protocol"]/' \
   "$store_source_dir/src-tauri/Cargo.toml"
+perl -0pi -e 's/, "updater"//' \
+  "$store_source_dir/src-tauri/Cargo.toml"
+perl -0pi -e 's/, "process-relaunch"//' \
+  "$store_source_dir/src-tauri/Cargo.toml"
 
-if grep -Fq '"macos-private-api"' "$store_source_dir/src-tauri/Cargo.toml"; then
-  echo "MAS manifest still enables macos-private-api" >&2
+if grep -Eq '"macos-private-api"|"updater"|"process-relaunch"' \
+  "$store_source_dir/src-tauri/Cargo.toml"; then
+  echo "MAS manifest still enables a direct-distribution Tauri feature" >&2
   exit 1
 fi
 

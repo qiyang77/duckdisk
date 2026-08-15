@@ -740,6 +740,7 @@ const Scanning = () => {
   const treeViewportRef = useRef<HTMLDivElement | null>(null);
   const treeScrollFrameRef = useRef<number | null>(null);
   const reviewRecordedForScan = useRef(false);
+  const hydratedDirectoryIds = useRef(new Set<string>());
   const suppressClickUntil = useRef(0);
   const [view, setView] = useState<"loading" | "disk">("loading");
   const [status, setStatus] = useState<ScanStatus | null>(null);
@@ -1341,18 +1342,6 @@ const Scanning = () => {
     invoke("show_in_folder", { path: node.id }).catch(console.error);
   };
 
-  const toggleExpanded = (node: DiskItem) => {
-    setExpandedIds((current) => {
-      const next = new Set(current);
-      if (next.has(node.id)) {
-        next.delete(node.id);
-      } else {
-        next.add(node.id);
-      }
-      return next;
-    });
-  };
-
   const startRescan = async () => {
     if (!isCloud && loadedFromCache) {
       await invoke("clear_cached_scan_result", { scanPath: disk, ratio }).catch(
@@ -1364,6 +1353,7 @@ const Scanning = () => {
         connectionId: accountId,
       }).catch(console.error);
     }
+    hydratedDirectoryIds.current.clear();
     setLoadedFromCache(false);
     setScanNonce((current) => current + 1);
   };
@@ -1416,9 +1406,12 @@ const Scanning = () => {
     });
   };
 
-  const refreshNode = async (node: DiskItem) => {
+  const refreshNode = async (
+    node: DiskItem,
+    announce = true
+  ): Promise<boolean> => {
     if (refreshingNodeId) {
-      return;
+      return false;
     }
 
     setContextMenu(null);
@@ -1458,17 +1451,48 @@ const Scanning = () => {
       setDeleteList((current) =>
         current.map((item) => findNode(nextRoot, item.id) || item)
       );
-      setRefreshNotice({
-        kind: "success",
-        message: `${getNodeName(node)} updated`,
-      });
+      if (announce) {
+        setRefreshNotice({
+          kind: "success",
+          message: `${getNodeName(node)} updated`,
+        });
+      }
+      return true;
     } catch (error) {
       setRefreshNotice({
         kind: "error",
         message: String(error),
       });
+      return false;
     } finally {
       setRefreshingNodeId(null);
+    }
+  };
+
+  const toggleExpanded = async (node: DiskItem) => {
+    if (expandedIds.has(node.id)) {
+      setExpandedIds((current) => {
+        const next = new Set(current);
+        next.delete(node.id);
+        return next;
+      });
+      return;
+    }
+
+    setExpandedIds((current) => new Set(current).add(node.id));
+    const needsHydration =
+      canRefreshItem &&
+      isDirectory(node) &&
+      getChildren(node).length === 0 &&
+      !hydratedDirectoryIds.current.has(node.id);
+    if (!needsHydration) {
+      return;
+    }
+
+    hydratedDirectoryIds.current.add(node.id);
+    const hydrated = await refreshNode(node, false);
+    if (!hydrated) {
+      hydratedDirectoryIds.current.delete(node.id);
     }
   };
 
@@ -2030,6 +2054,7 @@ const Scanning = () => {
                       : 0;
                   const directory = isDirectory(node);
                   const expanded = expandedIds.has(node.id);
+                  const refreshing = refreshingNodeId === node.id;
                   return (
                     <tr
                       key={
@@ -2054,7 +2079,7 @@ const Scanning = () => {
                       }}
                       className={`data-row select-none ${
                         deleted ? "bg-red-950/20 text-red-300" : ""
-                      }`}
+                      } ${refreshing ? "data-row-refreshing" : ""}`}
                       style={{
                         height: TREE_ROW_HEIGHT,
                         ...(deleted
@@ -2067,63 +2092,95 @@ const Scanning = () => {
                       }}
                     >
                       <td
-                        className={`max-w-[30rem] truncate border-b border-slate-800 px-2 py-1.5 ${
+                        className={`max-w-[30rem] overflow-hidden border-b border-slate-800 px-2 py-1.5 ${
                           deleted
                             ? "text-red-300 line-through decoration-red-400 decoration-2"
                             : "text-slate-100"
                         }`}
                       >
-                        <span
-                          className="inline-block"
-                          style={{ width: `${depth * 18}px` }}
-                        />
-                        {directory ? (
-                          <button
-                            disabled={deleted}
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              toggleExpanded(node);
-                            }}
-                            className="tree-toggle"
-                            title={expanded ? "Collapse folder" : "Expand folder"}
-                            aria-label={expanded ? "Collapse folder" : "Expand folder"}
-                          >
-                            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                          </button>
-                        ) : (
-                          <span className="mr-2 inline-block h-4 w-4" />
-                        )}
-                        {directory ? (
-                          <FolderIcon
-                            className="item-type-icon"
-                            size={14}
-                            fill="currentColor"
+                        <div className="tree-name-content">
+                          <span
+                            className="tree-name-indent"
+                            style={{ width: `${depth * 18}px` }}
                           />
-                        ) : (
-                          <FileIcon className="item-type-icon" size={14} />
-                        )}
-                        <button
-                          disabled={deleted}
-                          onClick={() => {
-                            if (Date.now() < suppressClickUntil.current) {
-                              return;
-                            }
-                            if (directory) {
-                              setCurrentNode(node);
-                              setExpandedIds(new Set());
-                            } else {
-                              reveal(node);
-                            }
-                          }}
-                          className={`text-left hover:underline disabled:hover:no-underline ${
-                            deleted
-                              ? "text-red-300 line-through decoration-red-400 decoration-2"
-                              : "text-slate-100"
-                          }`}
-                        >
-                          {getNodeName(node)}
-                        </button>
+                          {directory ? (
+                            <button
+                              disabled={deleted || refreshing}
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleExpanded(node);
+                              }}
+                              className={`tree-toggle ${
+                                refreshing ? "tree-toggle-loading" : ""
+                              }`}
+                              title={
+                                refreshing
+                                  ? "Loading folder contents..."
+                                  : expanded
+                                  ? "Collapse folder"
+                                  : "Expand folder"
+                              }
+                              aria-label={
+                                refreshing
+                                  ? "Loading folder contents"
+                                  : expanded
+                                  ? "Collapse folder"
+                                  : "Expand folder"
+                              }
+                            >
+                              {refreshing ? (
+                                <RefreshCw size={11} className="animate-spin" />
+                              ) : expanded ? (
+                                <ChevronDown size={12} />
+                              ) : (
+                                <ChevronRight size={12} />
+                              )}
+                            </button>
+                          ) : (
+                            <span className="tree-toggle-spacer" />
+                          )}
+                          {directory ? (
+                            <FolderIcon
+                              className="item-type-icon"
+                              size={14}
+                              fill="currentColor"
+                            />
+                          ) : (
+                            <FileIcon className="item-type-icon" size={14} />
+                          )}
+                          <button
+                            disabled={deleted || refreshing}
+                            title={getNodeName(node)}
+                            onClick={() => {
+                              if (Date.now() < suppressClickUntil.current) {
+                                return;
+                              }
+                              if (directory) {
+                                setCurrentNode(node);
+                                setExpandedIds(new Set());
+                              } else {
+                                reveal(node);
+                              }
+                            }}
+                            className={`tree-name-label hover:underline disabled:hover:no-underline ${
+                              deleted
+                                ? "text-red-300 line-through decoration-red-400 decoration-2"
+                                : "text-slate-100"
+                            }`}
+                          >
+                            {getNodeName(node)}
+                          </button>
+                          {refreshing && (
+                            <span
+                              className="tree-loading-label"
+                              role="status"
+                              aria-live="polite"
+                            >
+                              Loading contents...
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="border-b border-slate-800 px-2 py-1.5">
                         <PercentBar percent={percent} />

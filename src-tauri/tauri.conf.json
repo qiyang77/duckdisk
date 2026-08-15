@@ -18,6 +18,9 @@
         "confirm": true,
         "open": true
       },
+      "process": {
+        "relaunch": true
+      },
       "shell": {
         "all": false,
         "open": true
@@ -66,10 +69,12 @@
       "csp": "default-src 'self'; img-src 'self' asset: https://asset.localhost data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
     },
     "updater": {
-      "active": false,
-      "endpoints": [],
+      "active": true,
+      "endpoints": [
+        "https://github.com/qiyang77/duckdisk/releases/latest/download/latest.json"
+      ],
       "dialog": false,
-      "pubkey": ""
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM2MDMyNDMyMkFBNDBBNQpSV1NsUUtvaVF6SmdBOXZkRWkyNUsrRkUvNG1BU0pZRUVhYngxL1YwMHQvYmN1MnJxMDRmSU9lZwo="
     },
     "macOSPrivateApi": false,
     "windows": [

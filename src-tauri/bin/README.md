@@ -13,3 +13,7 @@ metadata lookup, so it does not add a second filesystem traversal. On macOS,
 files carrying the `UF_DATALESS` cloud-placeholder flag, plus zero-block
 provider placeholders without that flag, contribute zero bytes to local Size
 instead of inflating the disk result with remote-only content.
+
+The patch also preserves an `isDirectory` marker in JSON output. Empty,
+unreadable, and depth-truncated directories can therefore retain folder
+behavior even when their serialized `children` array is empty.

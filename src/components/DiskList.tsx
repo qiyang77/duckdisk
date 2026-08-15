@@ -5,7 +5,12 @@ import { invoke } from "@tauri-apps/api/tauri";
 
 import { getVersion } from "@tauri-apps/api/app";
 import { confirm as confirmDialog, open } from "@tauri-apps/api/dialog";
+import { relaunch } from "@tauri-apps/api/process";
 import { open as openExternal } from "@tauri-apps/api/shell";
+import {
+  checkUpdate as checkTauriUpdate,
+  installUpdate,
+} from "@tauri-apps/api/updater";
 import folderIcon from "../assets/folder.png";
 import oneDriveIcon from "../assets/onedrive.svg";
 import googleDriveIcon from "../assets/google-drive.png";
@@ -15,6 +20,7 @@ import { forgetDiskRoute } from "../diskRoute";
 import {
   ChevronRight,
   Cloud,
+  Download,
   Eye,
   EyeOff,
   ExternalLink,
@@ -99,10 +105,8 @@ const emptySshDraft: SshDraft = {
 };
 
 type UpdateCheck = {
-  currentVersion: string;
   latestVersion: string;
   updateAvailable: boolean;
-  releaseUrl: string;
 };
 
 declare global {
@@ -144,6 +148,7 @@ const DiskList = () => {
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [sshError, setSshError] = useState<string | null>(null);
   const [isCheckingUpdates, setCheckingUpdates] = useState(false);
+  const [isInstallingUpdate, setInstallingUpdate] = useState(false);
   const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -389,11 +394,52 @@ const DiskList = () => {
     setUpdateCheck(null);
     setUpdateError(null);
     try {
-      setUpdateCheck(await invoke<UpdateCheck>("check_for_updates"));
+      const result = await checkTauriUpdate();
+      setUpdateCheck({
+        latestVersion:
+          result.manifest?.version.replace(/^[vV]/, "") || appVersion,
+        updateAvailable: result.shouldUpdate,
+      });
     } catch (error) {
-      setUpdateError(String(error));
+      try {
+        const fallback = await invoke<UpdateCheck>("check_for_updates");
+        if (fallback.updateAvailable) {
+          setUpdateError(
+            `v ${fallback.latestVersion} is published, but its automatic update package is unavailable. Please try again later.`
+          );
+        } else {
+          setUpdateCheck(fallback);
+        }
+      } catch (fallbackError) {
+        setUpdateError(
+          `Could not check for updates: ${String(fallbackError || error)}`
+        );
+      }
     } finally {
       setCheckingUpdates(false);
+    }
+  };
+
+  const installAvailableUpdate = async () => {
+    if (!updateCheck?.updateAvailable || isInstallingUpdate) return;
+
+    const accepted = await confirmDialog(
+      `DuckDisk v ${updateCheck.latestVersion} is available. Download and install it now? DuckDisk will restart automatically.`,
+      {
+        title: "Install DuckDisk Update?",
+        type: "info",
+      }
+    );
+    if (!accepted) return;
+
+    setInstallingUpdate(true);
+    setUpdateError(null);
+    try {
+      await installUpdate();
+      await relaunch();
+    } catch (error) {
+      setUpdateError(`Update failed: ${String(error)}`);
+      setInstallingUpdate(false);
     }
   };
 
@@ -1089,7 +1135,9 @@ const DiskList = () => {
               }`}
             >
               {updateCheck.updateAvailable
-                ? `v ${updateCheck.latestVersion} available`
+                ? isInstallingUpdate
+                  ? `Installing v ${updateCheck.latestVersion}...`
+                  : `v ${updateCheck.latestVersion} available`
                 : "DuckDisk is up to date"}
             </span>
           )}
@@ -1103,17 +1151,18 @@ const DiskList = () => {
           {!isMacAppStore && updateCheck?.updateAvailable && (
             <button
               type="button"
-              onClick={() => openExternal(updateCheck.releaseUrl)}
+              onClick={installAvailableUpdate}
+              disabled={isInstallingUpdate}
               className="button button-warning"
             >
-              <ExternalLink size={14} />
-              View Release
+              <Download size={14} />
+              {isInstallingUpdate ? "Installing..." : "Install Update"}
             </button>
           )}
           {!isMacAppStore && <button
             type="button"
             onClick={checkForUpdates}
-            disabled={isCheckingUpdates}
+            disabled={isCheckingUpdates || isInstallingUpdate}
             className="button button-secondary"
           >
             <RefreshCw size={14} className={isCheckingUpdates ? "animate-spin" : ""} />
