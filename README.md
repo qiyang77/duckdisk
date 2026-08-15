@@ -14,10 +14,9 @@ The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
 Website: https://duckdisk.com/
 
-## What's New in v0.6.0
+## What's New in v0.6.1
 
-- Bug fixes.
-- Added sorting.
+- Fixed several bugs.
 
 ## Screenshots
 

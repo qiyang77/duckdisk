@@ -38,6 +38,17 @@ jobs:
           node-version: "lts/*"
           cache: "npm"
 
+      - name: Verify README release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_version="$(node -p "require('./package.json').version")"
+          readme_version="$(sed -n "s/^## What's New in v//p" README.md | head -n 1)"
+          if [[ "$readme_version" != "$package_version" ]]; then
+            echo "README What's New version ($readme_version) does not match package version ($package_version)" >&2
+            exit 1
+          fi
+
       - name: Install app dependencies
         run: npm ci
 
