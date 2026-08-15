@@ -209,7 +209,7 @@ a {
 }
 
 .hero-backdrop {
-  background-image: url("screenshots/scan-results.png?v=0.6.1");
+  background-image: url("screenshots/scan-results.png?v=0.6.1-media-6");
   background-position: center bottom;
   background-repeat: no-repeat;
   background-size: cover;
@@ -1152,6 +1152,8 @@ code {
   }
 
   .workflow-shot img {
+    min-height: 0;
+    object-fit: contain;
     object-position: center center;
   }
 

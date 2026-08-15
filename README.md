@@ -1,5 +1,9 @@
 # DuckDisk
 
+<p align="center">
+  <img src="docs/assets/duckdisk-icon.png?v=0.6.1-media-6" alt="DuckDisk logo" width="144" height="144">
+</p>
+
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 [![release](https://img.shields.io/github/v/release/qiyang77/duckdisk?label=release)](https://github.com/qiyang77/duckdisk/releases)
 [![website](https://img.shields.io/badge/website-duckdisk-blue)](https://duckdisk.com/)
@@ -22,11 +26,11 @@ Website: https://duckdisk.com/
 
 ### Scan a Local Disk
 
-![DuckDisk local disk scan demo](docs/screenshots/local-scan.gif)
+![DuckDisk local disk scan demo](docs/screenshots/local-scan.gif?v=0.6.1-media-6)
 
 ### Drag to Remove Files
 
-![DuckDisk drag-to-remove demo](docs/screenshots/drag-remove.gif)
+![DuckDisk drag-to-remove demo](docs/screenshots/drag-remove.gif?v=0.6.1-media-6)
 
 ## Features
 
