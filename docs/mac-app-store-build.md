@@ -52,7 +52,8 @@ The `Mac App Store` GitHub Actions workflow imports the two distribution
 certificates, builds and validates the package, and can upload it to App Store
 Connect. With the `submit` input enabled, it also waits for processing, creates
 the App Store version, copies localization metadata, sets the supplied
-`What's New` text, attaches the build, and submits it to App Review.
+`What's New` and `Promotional Text` values, attaches the build, and submits it
+to App Review.
 
 Create the App Store Connect app and Mac App Store provisioning profile for the explicit bundle ID `com.duckdisk.app`. The build script decodes the profile and refuses to sign if its bundle ID or Team ID does not match.
 

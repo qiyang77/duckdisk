@@ -4,6 +4,7 @@ set -euo pipefail
 version="${1:?Pass the App Store version}"
 build_number="${2:?Pass the App Store build number}"
 whats_new="${3:-Fixed several bugs.}"
+promotional_text="${4:-An informative, table-first storage analyzer for Mac, OneDrive, and SSH—built around dense, practical results.}"
 bundle_id="${MAS_BUNDLE_ID:-com.duckdisk.app}"
 api_root="https://api.appstoreconnect.apple.com"
 
@@ -138,14 +139,16 @@ if [[ "$(jq 'length' <<< "$localizations")" -eq 0 ]]; then
   fi
 
   while IFS= read -r localization; do
-    attributes="$(jq -c --arg whats_new "$whats_new" '
+    attributes="$(jq -c \
+      --arg whats_new "$whats_new" \
+      --arg promotional_text "$promotional_text" '
       .attributes
       | {
           locale,
           description,
           keywords,
           marketingUrl,
-          promotionalText,
+          promotionalText: $promotional_text,
           supportUrl,
           whatsNew: $whats_new
         }
@@ -172,17 +175,22 @@ else
     localization_body="$(jq -cn \
       --arg id "$localization_id" \
       --arg whats_new "$whats_new" \
+      --arg promotional_text "$promotional_text" \
       '{
         data: {
           type: "appStoreVersionLocalizations",
           id: $id,
-          attributes: { whatsNew: $whats_new }
+          attributes: {
+            whatsNew: $whats_new,
+            promotionalText: $promotional_text
+          }
         }
       }')"
     asc_request PATCH "/v1/appStoreVersionLocalizations/$localization_id" "$localization_body"
   done < <(jq -r '.[].id' <<< "$localizations")
 fi
 echo "Updated What's New to: $whats_new"
+echo "Updated Promotional Text to: $promotional_text"
 
 encoded_build_number="$(urlencode "$build_number")"
 build_id=""

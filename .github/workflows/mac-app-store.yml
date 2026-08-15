@@ -23,6 +23,11 @@ on:
         required: false
         default: "Fixed several bugs."
         type: string
+      promotional_text:
+        description: Promotional Text to use in every App Store localization
+        required: false
+        default: "An informative, table-first storage analyzer for Mac, OneDrive, and SSH—built around dense, practical results."
+        type: string
 
 permissions:
   contents: read
@@ -143,6 +148,7 @@ jobs:
           APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
           MAS_SUBMIT_BUILD_NUMBER: ${{ inputs.build_number }}
           MAS_WHATS_NEW: ${{ inputs.whats_new }}
+          MAS_PROMOTIONAL_TEXT: ${{ inputs.promotional_text }}
         shell: bash
         run: |
           set -euo pipefail
@@ -155,7 +161,8 @@ jobs:
           bash scripts/submit-mac-app-store.sh \
             "$version" \
             "$MAS_SUBMIT_BUILD_NUMBER" \
-            "$MAS_WHATS_NEW"
+            "$MAS_WHATS_NEW" \
+            "$MAS_PROMOTIONAL_TEXT"
 
       - name: Upload workflow artifact
         if: inputs.upload || !inputs.submit
