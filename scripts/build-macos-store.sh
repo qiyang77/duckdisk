@@ -6,7 +6,7 @@ cd "$root_dir"
 
 export CI=true
 version="$(node -p "require('./package.json').version")"
-build_number="${MAS_BUILD_NUMBER:-511}"
+build_number="${MAS_BUILD_NUMBER:-512}"
 store_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/duckdisk-mas.XXXXXX")"
 store_source_dir="$store_work_dir/source"
 store_output_dir="$root_dir/src-tauri/target/mas-store"
