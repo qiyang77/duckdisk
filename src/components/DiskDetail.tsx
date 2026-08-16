@@ -179,6 +179,9 @@ const sortChildrenBySize = (children: DiskItem[]) =>
 const isDirectory = (node: DiskItem) =>
   node.isDirectory || Boolean(node.children && node.children.length > 0);
 
+const canTrashNode = (node: DiskItem, isGoogleDrive: boolean) =>
+  !isGoogleDrive || node.canTrash !== false;
+
 const getNodeName = (node: DiskItem) => {
   if (node.name && node.name !== "/") {
     return node.name;
@@ -1388,6 +1391,7 @@ const Scanning = () => {
       !node ||
       node.id === "/" ||
       node.id === rootNode?.id ||
+      !canTrashNode(node, isGoogleDrive) ||
       isDeletedPath(node.id, deletedIds)
     ) {
       return;
@@ -1513,6 +1517,7 @@ const Scanning = () => {
       event.button !== 0 ||
       node.id === "/" ||
       node.id === rootNode?.id ||
+      !canTrashNode(node, isGoogleDrive) ||
       deleted
     ) {
       return;
@@ -2178,6 +2183,14 @@ const Scanning = () => {
                           >
                             {getNodeName(node)}
                           </button>
+                          {isGoogleDrive && node.ownedByMe === false && (
+                            <span
+                              className="ml-2 text-[10px] text-slate-500"
+                              title="Owned by another account"
+                            >
+                              Shared
+                            </span>
+                          )}
                           {refreshing && (
                             <span
                               className="tree-loading-label"
@@ -2500,13 +2513,23 @@ const Scanning = () => {
               <div className="context-menu-separator" />
               <button
                 role="menuitem"
+                disabled={!canTrashNode(contextMenu.node, isGoogleDrive)}
+                title={
+                  canTrashNode(contextMenu.node, isGoogleDrive)
+                    ? undefined
+                    : "You do not have permission to move this item to Trash"
+                }
                 onClick={() => {
                   addDeleteTarget(contextMenu.node);
                   setContextMenu(null);
                 }}
-                className="context-menu-item context-menu-item-danger"
+                className="context-menu-item context-menu-item-danger disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {usesTrash ? "Add to Trash List" : "Add to Delete List"}
+                {usesTrash && !canTrashNode(contextMenu.node, isGoogleDrive)
+                  ? "Cannot Move to Trash"
+                  : usesTrash
+                  ? "Add to Trash List"
+                  : "Add to Delete List"}
               </button>
             </>
           )}

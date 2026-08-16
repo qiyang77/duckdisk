@@ -28,7 +28,7 @@ use crate::oauth_config;
 const API_ROOT: &str = "https://www.googleapis.com/drive/v3";
 const DRIVE_SCOPE: &str = "https://www.googleapis.com/auth/drive";
 const KEYCHAIN_SERVICE: &str = "com.duckdisk.dev.googledrive";
-const CACHE_VERSION: &str = "duckdisk-google-drive-cache-v1";
+const CACHE_VERSION: &str = "duckdisk-google-drive-cache-v2";
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(120);
 const USER_CAP_MESSAGE: &str = "Google Drive sign-in is temporarily unavailable because DuckDisk has reached Google's 100-user limit. Please check for a newer DuckDisk release or try again after the app completes Google verification.";
 const SCAN_CANCELLED_MESSAGE: &str = "Google Drive scan cancelled.";
@@ -70,6 +70,8 @@ struct CachedItem {
     name: String,
     size: u64,
     is_folder: bool,
+    can_trash: bool,
+    owned_by_me: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -110,10 +112,17 @@ struct DriveFile {
     id: String,
     name: Option<String>,
     mime_type: Option<String>,
-    size: Option<String>,
     quota_bytes_used: Option<String>,
     parents: Option<Vec<String>>,
     trashed: Option<bool>,
+    capabilities: Option<DriveFileCapabilities>,
+    owned_by_me: Option<bool>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DriveFileCapabilities {
+    can_trash: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -315,12 +324,22 @@ pub async fn trash_items(
 
     let mut access_token = refresh_access_token(account_id).await?;
     let http = Client::new();
+    let path = cache_path(app_handle, account_id)?;
+    let cache = read_cache(&path, account_id);
     let total = item_ids.len() as u64;
     let mut deleted_ids = Vec::new();
     let mut failures = Vec::new();
 
     for (index, item_id) in item_ids.into_iter().enumerate() {
-        let mut result = google_trash_item(&http, &access_token, &item_id).await;
+        let can_trash = cache
+            .as_ref()
+            .and_then(|cache| cache.items.get(&item_id))
+            .map(|item| item.can_trash);
+        let mut result = if can_trash == Some(false) {
+            Err("This Google Drive item cannot be moved to Trash by the current user.".to_string())
+        } else {
+            google_trash_item(&http, &access_token, &item_id).await
+        };
         if result
             .as_ref()
             .err()
@@ -352,7 +371,6 @@ pub async fn trash_items(
     }
 
     if !deleted_ids.is_empty() {
-        let path = cache_path(app_handle, account_id)?;
         if let Some(mut cache) = read_cache(&path, account_id) {
             for item_id in &deleted_ids {
                 remove_cached_subtree(&mut cache, item_id);
@@ -510,7 +528,7 @@ async fn full_scan(
     let root: DriveFile = google_get(
         http,
         access_token,
-        &format!("{API_ROOT}/files/root?fields=id,name,mimeType"),
+        &format!("{API_ROOT}/files/root?fields=id,name,mimeType,ownedByMe,capabilities(canTrash)"),
     )
     .await?;
     let root_id = root.id.clone();
@@ -530,7 +548,7 @@ async fn full_scan(
                 ("q", "trashed = false"),
                 (
                     "fields",
-                    "nextPageToken,files(id,name,mimeType,size,quotaBytesUsed,parents,trashed)",
+                    "nextPageToken,files(id,name,mimeType,quotaBytesUsed,parents,trashed,ownedByMe,capabilities(canTrash))",
                 ),
             ]);
         if let Some(token) = &page_token {
@@ -594,7 +612,7 @@ async fn incremental_scan(
                 ("pageToken", token.as_str()),
                 ("pageSize", "1000"),
                 ("spaces", "drive"),
-                ("fields", "nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,mimeType,size,quotaBytesUsed,parents,trashed))"),
+                ("fields", "nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,mimeType,quotaBytesUsed,parents,trashed,ownedByMe,capabilities(canTrash)))"),
             ]);
         let page: ChangePage = google_response(request.send().await).await?;
         ensure_scan_active(&cache.account_id)?;
@@ -628,16 +646,25 @@ async fn incremental_scan(
 }
 
 fn cached_item(file: DriveFile) -> CachedItem {
+    let can_trash = file
+        .capabilities
+        .and_then(|capabilities| capabilities.can_trash)
+        .unwrap_or(false);
+    let owned_by_me = file.owned_by_me.unwrap_or(false);
     CachedItem {
         id: file.id,
         parent_id: file.parents.and_then(|items| items.into_iter().next()),
         name: file.name.unwrap_or_else(|| "(unnamed)".to_string()),
-        size: file
-            .size
-            .or(file.quota_bytes_used)
-            .and_then(|size| size.parse().ok())
-            .unwrap_or_default(),
+        size: if owned_by_me {
+            file.quota_bytes_used
+                .and_then(|size| size.parse().ok())
+                .unwrap_or_default()
+        } else {
+            0
+        },
         is_folder: file.mime_type.as_deref() == Some("application/vnd.google-apps.folder"),
+        can_trash,
+        owned_by_me,
     }
 }
 
@@ -721,6 +748,8 @@ fn build_node(
         "name": item.name,
         "cloudId": item.id,
         "isDirectory": item.is_folder,
+        "canTrash": item.can_trash,
+        "ownedByMe": item.owned_by_me,
         "size": size,
         "children": children
     }))
@@ -1207,6 +1236,8 @@ mod tests {
             name: name.to_string(),
             size,
             is_folder: folder,
+            can_trash: true,
+            owned_by_me: true,
         }
     }
 
@@ -1245,6 +1276,26 @@ mod tests {
             serde_json::from_str(&build_scan_json(&cache, &account).unwrap()).unwrap();
         assert_eq!(result["tree"]["size"], 50);
         assert_eq!(result["tree"]["children"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn shared_file_uses_quota_size_and_cannot_be_trashed() {
+        let file: DriveFile = serde_json::from_value(json!({
+            "id": "shared-file",
+            "name": "archive.zip",
+            "mimeType": "application/zip",
+            "size": "8589934592",
+            "quotaBytesUsed": "8589934592",
+            "ownedByMe": false,
+            "capabilities": { "canTrash": false }
+        }))
+        .unwrap();
+
+        let item = cached_item(file);
+
+        assert_eq!(item.size, 0);
+        assert!(!item.owned_by_me);
+        assert!(!item.can_trash);
     }
 
     #[test]
