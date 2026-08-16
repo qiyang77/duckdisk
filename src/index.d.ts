@@ -3,6 +3,8 @@ interface DiskItem {
   name: string;
   displayName?: string;
   cloudId?: string;
+  canTrash?: boolean;
+  ownedByMe?: boolean;
   value: number;
   size: number;
   allocatedSize?: number;
