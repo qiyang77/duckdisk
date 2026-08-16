@@ -18,14 +18,18 @@
     "release:macos-store": "bash scripts/build-macos-store.sh"
   },
   "dependencies": {
-    "@tauri-apps/api": "^1.6.0",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-shell": "^2.3.5",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "d3": "^7.9.0",
     "lucide-react": "^1.28.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^1.6.3",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/d3": "^7.4.3",
     "@types/node": "^22.20.1",
     "@types/react": "^18.3.31",

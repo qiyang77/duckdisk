@@ -1,7 +1,8 @@
 import Logo from "../assets/duck.png";
 import { Link, useLocation } from "../router";
-import { appWindow } from "@tauri-apps/api/window";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { ChevronRight } from "lucide-react";
+const appWindow = getCurrentWebviewWindow();
 
 const TitleBar = () => {
   let { state, pathname } = useLocation() as any;

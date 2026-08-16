@@ -4,7 +4,7 @@ import removableDriver from "../assets/removable-drive.png";
 import { useNavigate } from "../router";
 import { formatBytes } from "../formatBytes";
 import { ChevronRight } from "lucide-react";
-import { open } from "@tauri-apps/api/dialog";
+import { open } from "@tauri-apps/plugin-dialog";
 
 const isMacAppStore = import.meta.env.VITE_DISTRIBUTION === "mas";
 

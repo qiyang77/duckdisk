@@ -13,7 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 static ACTIVE_SCANS: Lazy<Mutex<HashMap<String, Arc<AtomicBool>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
@@ -323,7 +323,7 @@ pub fn start_scan(
     if !force_full {
         if let Some(path) = copy_cached_result_to_temp(&app_handle, &connection_id)? {
             app_handle
-                .emit_all(
+                .emit(
                     "ssh_scan_incremental",
                     AccountPayload {
                         account_id: connection_id.clone(),
@@ -331,7 +331,7 @@ pub fn start_scan(
                 )
                 .ok();
             app_handle
-                .emit_all(
+                .emit(
                     "ssh_scan_completed",
                     CompletedPayload {
                         account_id: connection_id,
@@ -352,7 +352,7 @@ pub fn start_scan(
         active.insert(connection_id.clone(), cancelled.clone());
     }
     app_handle
-        .emit_all(
+        .emit(
             "ssh_scan_full",
             AccountPayload {
                 account_id: connection_id.clone(),
@@ -360,7 +360,7 @@ pub fn start_scan(
         )
         .ok();
     app_handle
-        .emit_all(
+        .emit(
             "ssh_scan_status",
             ScanStatusPayload {
                 account_id: connection_id.clone(),
@@ -379,7 +379,7 @@ pub fn start_scan(
             Ok((path, content)) => {
                 if let Err(message) = write_cached_result(&app_handle, &connection_id, &content) {
                     app_handle
-                        .emit_all(
+                        .emit(
                             "ssh_scan_failed",
                             FailedPayload {
                                 account_id: connection_id.clone(),
@@ -394,7 +394,7 @@ pub fn start_scan(
                     return;
                 }
                 app_handle
-                    .emit_all(
+                    .emit(
                         "ssh_scan_finalizing",
                         AccountPayload {
                             account_id: connection_id.clone(),
@@ -402,7 +402,7 @@ pub fn start_scan(
                     )
                     .ok();
                 app_handle
-                    .emit_all(
+                    .emit(
                         "ssh_scan_completed",
                         CompletedPayload {
                             account_id: connection_id.clone(),
@@ -415,7 +415,7 @@ pub fn start_scan(
             Err(message) if message == SCAN_CANCELLED_MESSAGE => {}
             Err(message) => {
                 app_handle
-                    .emit_all(
+                    .emit(
                         "ssh_scan_failed",
                         FailedPayload {
                             account_id: connection_id.clone(),
@@ -533,7 +533,7 @@ print(json.dumps({"deletedIds": deleted, "failures": failures}, separators=(",",
     let result: SshDeleteResult = serde_json::from_slice(&output.stdout)
         .map_err(|err| format!("Remote deletion returned invalid JSON: {err}"))?;
     app_handle
-        .emit_all(
+        .emit(
             "ssh_delete_status",
             DeleteStatusPayload {
                 current: item_ids.len() as u64,
@@ -743,7 +743,7 @@ fn parse_progress(line: &str) -> Option<(u64, u64)> {
 
 fn emit_scan_status(app_handle: &tauri::AppHandle, account_id: &str, items: u64, total: u64) {
     app_handle
-        .emit_all(
+        .emit(
             "ssh_scan_status",
             ScanStatusPayload {
                 account_id: account_id.to_string(),
@@ -763,13 +763,13 @@ fn cache_path(app_handle: &tauri::AppHandle, connection_id: &str) -> Result<Path
     "dual-size-v2-dataless".hash(&mut hasher);
     connection_id.hash(&mut hasher);
     app_handle
-        .path_resolver()
+        .path()
         .app_cache_dir()
         .map(|path| {
             path.join("ssh")
                 .join(format!("{:016x}.json", hasher.finish()))
         })
-        .ok_or_else(|| "Could not resolve DuckDisk cache directory".to_string())
+        .map_err(|_| "Could not resolve DuckDisk cache directory".to_string())
 }
 
 fn temporary_result_path() -> PathBuf {
@@ -846,10 +846,10 @@ fn delete_password(connection_id: &str) -> Result<(), String> {
 
 fn connections_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     app_handle
-        .path_resolver()
+        .path()
         .app_config_dir()
         .map(|path| path.join("ssh-connections.json"))
-        .ok_or_else(|| "Could not resolve DuckDisk configuration directory".to_string())
+        .map_err(|_| "Could not resolve DuckDisk configuration directory".to_string())
 }
 
 fn read_connections(app_handle: &tauri::AppHandle) -> Result<Vec<SshConnection>, String> {

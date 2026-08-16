@@ -1,16 +1,13 @@
 import { useEffect, useState } from "react";
 
 import DiskItem from "./DiskItem";
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from "@tauri-apps/api/core";
 
 import { getVersion } from "@tauri-apps/api/app";
-import { confirm as confirmDialog, open } from "@tauri-apps/api/dialog";
-import { relaunch } from "@tauri-apps/api/process";
-import { open as openExternal } from "@tauri-apps/api/shell";
-import {
-  checkUpdate as checkTauriUpdate,
-  installUpdate,
-} from "@tauri-apps/api/updater";
+import { confirm as confirmDialog, open } from "@tauri-apps/plugin-dialog";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { open as openExternal } from "@tauri-apps/plugin-shell";
+import { check as checkTauriUpdate } from "@tauri-apps/plugin-updater";
 import folderIcon from "../assets/folder.png";
 import oneDriveIcon from "../assets/onedrive.svg";
 import googleDriveIcon from "../assets/google-drive.png";
@@ -92,6 +89,11 @@ const isMacAppStore = import.meta.env.VITE_DISTRIBUTION === "mas";
 const googleDriveEnabled =
   import.meta.env.VITE_GOOGLE_DRIVE_ENABLED !== "false";
 
+const waitForUiPaint = () =>
+  new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+
 const emptySshDraft: SshDraft = {
   name: "",
   host: "",
@@ -149,6 +151,7 @@ const DiskList = () => {
   const [sshError, setSshError] = useState<string | null>(null);
   const [isCheckingUpdates, setCheckingUpdates] = useState(false);
   const [isInstallingUpdate, setInstallingUpdate] = useState(false);
+  const [isOpeningFolderPicker, setOpeningFolderPicker] = useState(false);
   const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -158,6 +161,31 @@ const DiskList = () => {
     //   window.electron.app
     // setAppVersion(window.electron.appInfo().version)
   }, []);
+
+  const scanFolder = async () => {
+    if (isOpeningFolderPicker) return;
+
+    setOpeningFolderPicker(true);
+    await waitForUiPaint();
+    try {
+      const directory = await open({
+        multiple: false,
+        directory: true,
+      });
+      if (typeof directory !== "string") return;
+
+      navigate("/disk", {
+        state: {
+          disk: directory.replace(/\\/g, "/"),
+          used: 0,
+          fullscan: true,
+          isDirectory: true,
+        },
+      });
+    } finally {
+      setOpeningFolderPicker(false);
+    }
+  };
 
   useEffect(() => {
     // window.electron.diskUtils.killDiskSizeWorker();
@@ -320,7 +348,7 @@ const DiskList = () => {
             `Confirm that this is the SSH host key shown by your server administrator:\n\n${fingerprint}`,
             {
               title: "Trust SSH Server?",
-              type: "warning",
+              kind: "warning",
             }
           );
           if (!trusted) return;
@@ -396,9 +424,8 @@ const DiskList = () => {
     try {
       const result = await checkTauriUpdate();
       setUpdateCheck({
-        latestVersion:
-          result.manifest?.version.replace(/^[vV]/, "") || appVersion,
-        updateAvailable: result.shouldUpdate,
+        latestVersion: result?.version.replace(/^[vV]/, "") || appVersion,
+        updateAvailable: result !== null,
       });
     } catch (error) {
       try {
@@ -427,7 +454,7 @@ const DiskList = () => {
       `DuckDisk v ${updateCheck.latestVersion} is available. Download and install it now? DuckDisk will restart automatically.`,
       {
         title: "Install DuckDisk Update?",
-        type: "info",
+        kind: "info",
       }
     );
     if (!accepted) return;
@@ -435,7 +462,15 @@ const DiskList = () => {
     setInstallingUpdate(true);
     setUpdateError(null);
     try {
-      await installUpdate();
+      const update = await checkTauriUpdate();
+      if (!update) {
+        setUpdateCheck({ latestVersion: appVersion, updateAvailable: false });
+        setUpdateError("The update is no longer available.");
+        setInstallingUpdate(false);
+        return;
+      }
+      await update.downloadAndInstall();
+      await update.close();
       await relaunch();
     } catch (error) {
       setUpdateError(`Update failed: ${String(error)}`);
@@ -460,32 +495,27 @@ const DiskList = () => {
             <button
               type="button"
               className="storage-row group w-full text-left"
-              onClick={() => {
-                open({
-                  multiple: false,
-                  directory: true,
-                }).then((directory) => {
-                  if (directory)
-                    navigate("/disk", {
-                      state: {
-                        disk: (directory as string).replace(/\\/g, "/"),
-                        used: 0,
-                        fullscan: true,
-                        isDirectory: true,
-                      },
-                    });
-                });
-              }}
+              onClick={() => void scanFolder()}
+              disabled={isOpeningFolderPicker}
+              aria-busy={isOpeningFolderPicker}
             >
               <div className="storage-icon storage-icon-folder">
-                <img src={folderIcon} alt="" />
+                {isOpeningFolderPicker ? (
+                  <RefreshCw size={20} className="animate-spin" />
+                ) : (
+                  <img src={folderIcon} alt="" />
+                )}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="text-[14px] font-semibold text-[#f4f6f7]">
-                  Scan a Folder
+                  {isOpeningFolderPicker
+                    ? "Opening Folder Picker"
+                    : "Scan a Folder"}
                 </div>
                 <div className="mt-1 text-[12px] text-[#7f8993]">
-                  Choose a specific folder instead of an entire disk
+                  {isOpeningFolderPicker
+                    ? "Waiting for macOS"
+                    : "Choose a specific folder instead of an entire disk"}
                 </div>
               </div>
               <ChevronRight className="storage-chevron" size={17} />

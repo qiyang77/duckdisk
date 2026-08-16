@@ -4,8 +4,8 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "$0")/.." && pwd)"
 tauri_cli="$root_dir/node_modules/.bin/tauri"
 
-# Tauri 1 disables Cargo's default features in dev mode. Explicitly restore the
-# direct-distribution flavor so `npm run tauri dev` keeps its existing behavior.
+# Explicitly select the direct-distribution flavor in development so local
+# builds keep Google Drive, SSH, and updater behavior enabled.
 if [[ "${1:-}" == "dev" ]]; then
   shift
   exec "$tauri_cli" dev --features direct "$@"

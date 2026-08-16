@@ -20,7 +20,7 @@ use once_cell::sync::Lazy;
 use reqwest::{Client, StatusCode};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use url::Url;
 
 use crate::oauth_config;
@@ -341,7 +341,7 @@ pub async fn trash_items(
             Err(message) => failures.push(GoogleDriveDeleteFailure { item_id, message }),
         }
         app_handle
-            .emit_all(
+            .emit(
                 "googledrive_delete_status",
                 DeleteStatusPayload {
                     current: index as u64 + 1,
@@ -398,7 +398,7 @@ pub fn start_scan(
         match scan_account(&app_handle, &account_id, force_full).await {
             Ok(path) => {
                 app_handle
-                    .emit_all(
+                    .emit(
                         "googledrive_scan_completed",
                         CompletedPayload {
                             account_id: account_id.clone(),
@@ -411,7 +411,7 @@ pub fn start_scan(
             Err(message) if message == SCAN_CANCELLED_MESSAGE => {}
             Err(message) => {
                 app_handle
-                    .emit_all(
+                    .emit(
                         "googledrive_scan_failed",
                         FailedPayload {
                             account_id: account_id.clone(),
@@ -479,7 +479,7 @@ async fn scan_account(
     ensure_scan_active(account_id)?;
     write_cache(&path, &cache)?;
     app_handle
-        .emit_all(
+        .emit(
             "googledrive_scan_finalizing",
             AccountPayload {
                 account_id: account_id.to_string(),
@@ -500,7 +500,7 @@ async fn full_scan(
     account_id: &str,
 ) -> Result<GoogleDriveCache, String> {
     app_handle
-        .emit_all(
+        .emit(
             "googledrive_scan_full",
             AccountPayload {
                 account_id: account_id.to_string(),
@@ -576,7 +576,7 @@ async fn incremental_scan(
     mut cache: GoogleDriveCache,
 ) -> Result<GoogleDriveCache, String> {
     app_handle
-        .emit_all(
+        .emit(
             "googledrive_scan_incremental",
             AccountPayload {
                 account_id: cache.account_id.clone(),
@@ -972,10 +972,10 @@ fn read_credential(account_id: &str) -> Result<StoredCredential, String> {
 
 fn accounts_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     app_handle
-        .path_resolver()
+        .path()
         .app_config_dir()
         .map(|path| path.join("google-drive-accounts.json"))
-        .ok_or_else(|| "Could not resolve DuckDisk configuration directory".to_string())
+        .map_err(|_| "Could not resolve DuckDisk configuration directory".to_string())
 }
 
 fn read_accounts(app_handle: &tauri::AppHandle) -> Result<Vec<GoogleDriveAccount>, String> {
@@ -1019,13 +1019,13 @@ fn cache_path(app_handle: &tauri::AppHandle, account_id: &str) -> Result<PathBuf
     let mut hasher = DefaultHasher::new();
     account_id.hash(&mut hasher);
     app_handle
-        .path_resolver()
+        .path()
         .app_cache_dir()
         .map(|path| {
             path.join("google-drive")
                 .join(format!("{:016x}.json", hasher.finish()))
         })
-        .ok_or_else(|| "Could not resolve DuckDisk cache directory".to_string())
+        .map_err(|_| "Could not resolve DuckDisk cache directory".to_string())
 }
 
 fn read_cache(path: &Path, account_id: &str) -> Option<GoogleDriveCache> {
@@ -1085,7 +1085,7 @@ fn write_scan_result(content: &str) -> Result<PathBuf, String> {
 
 fn emit_status(app_handle: &tauri::AppHandle, account_id: &str, items: u64, total: u64) {
     app_handle
-        .emit_all(
+        .emit(
             "googledrive_scan_status",
             ScanStatusPayload {
                 account_id: account_id.to_string(),

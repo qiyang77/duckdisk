@@ -21,7 +21,9 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
 };
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+#[cfg(feature = "mas")]
+use tauri_plugin_shell::ShellExt;
 use url::Url;
 
 use crate::oauth_config;
@@ -243,7 +245,10 @@ pub async fn connect_account(app_handle: &tauri::AppHandle) -> Result<OneDriveAc
         .map_err(|err| format!("Could not open Microsoft sign-in: {err}"))?;
 
     #[cfg(feature = "mas")]
-    tauri::api::shell::open(&app_handle.shell_scope(), authorize_url.as_str(), None)
+    #[allow(deprecated)]
+    app_handle
+        .shell()
+        .open(authorize_url.as_str(), None)
         .map_err(|err| format!("Could not open Microsoft sign-in: {err}"))?;
 
     let expected_state = csrf_token.secret().to_string();
@@ -334,7 +339,7 @@ pub fn start_scan(
         match scan_account(&app_handle, &account_id, force_full).await {
             Ok(path) => {
                 app_handle
-                    .emit_all(
+                    .emit(
                         "onedrive_scan_completed",
                         CompletedPayload {
                             account_id: account_id.clone(),
@@ -347,7 +352,7 @@ pub fn start_scan(
             Err(err) if err == SCAN_CANCELLED_MESSAGE => {}
             Err(err) => {
                 app_handle
-                    .emit_all(
+                    .emit(
                         "onedrive_scan_failed",
                         FailedPayload {
                             account_id: account_id.clone(),
@@ -534,7 +539,7 @@ pub async fn delete_items(
             Err(message) => failures.push(OneDriveDeleteFailure { item_id, message }),
         }
         app_handle
-            .emit_all(
+            .emit(
                 "onedrive_delete_status",
                 DeleteStatusPayload {
                     current: index as u64 + 1,
@@ -1194,10 +1199,10 @@ fn account_from_drive(drive: &GraphDrive) -> OneDriveAccount {
 
 fn accounts_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     app_handle
-        .path_resolver()
+        .path()
         .app_config_dir()
         .map(|path| path.join("onedrive-accounts.json"))
-        .ok_or_else(|| "Could not resolve DuckDisk configuration directory".to_string())
+        .map_err(|_| "Could not resolve DuckDisk configuration directory".to_string())
 }
 
 fn read_accounts(app_handle: &tauri::AppHandle) -> Result<Vec<OneDriveAccount>, String> {
@@ -1239,10 +1244,10 @@ fn cache_path(app_handle: &tauri::AppHandle, account_id: &str) -> Result<PathBuf
     account_id.hash(&mut hasher);
     let key = hasher.finish();
     app_handle
-        .path_resolver()
+        .path()
         .app_cache_dir()
         .map(|path| path.join("onedrive").join(format!("{key:016x}.json")))
-        .ok_or_else(|| "Could not resolve DuckDisk cache directory".to_string())
+        .map_err(|_| "Could not resolve DuckDisk cache directory".to_string())
 }
 
 fn read_cache(path: &Path, account_id: &str) -> Option<OneDriveCache> {
@@ -1293,7 +1298,7 @@ fn emit_scan_status(app_handle: &tauri::AppHandle, account_id: &str, items: u64,
         scan.total = total;
     }
     app_handle
-        .emit_all(
+        .emit(
             "onedrive_scan_status",
             ScanStatusPayload {
                 account_id: account_id.to_string(),
@@ -1317,7 +1322,7 @@ fn emit_scan_phase(app_handle: &tauri::AppHandle, account_id: &str, phase: Activ
         scan.phase = Some(phase);
     }
     app_handle
-        .emit_all(
+        .emit(
             scan_phase_event(phase),
             AccountPayload {
                 account_id: account_id.to_string(),
@@ -1329,7 +1334,7 @@ fn emit_scan_phase(app_handle: &tauri::AppHandle, account_id: &str, phase: Activ
 fn replay_active_scan(app_handle: &tauri::AppHandle, account_id: &str, scan: &ActiveScan) {
     if let Some(phase) = scan.phase {
         app_handle
-            .emit_all(
+            .emit(
                 scan_phase_event(phase),
                 AccountPayload {
                     account_id: account_id.to_string(),

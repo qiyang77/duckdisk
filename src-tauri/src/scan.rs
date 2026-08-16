@@ -9,8 +9,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Mutex;
-use tauri::api::process::{Command as TauriCommand, CommandEvent};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 use crate::temp_files::validate_result_file;
 use crate::MyState;
@@ -97,7 +97,7 @@ pub fn start(
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(scan_key.clone());
         if !inserted {
-            app_handle.emit_all("scan_incremental", ()).ok();
+            app_handle.emit("scan_incremental", ()).ok();
             return Ok(());
         }
 
@@ -106,7 +106,7 @@ pub fn start(
                 Ok((result_path, error_report)) => match write_scan_error_report(&error_report) {
                     Ok(errors_path) => {
                         app_handle
-                            .emit_all(
+                            .emit(
                                 "scan_completed",
                                 CompletedPayload {
                                     path: result_path.display().to_string(),
@@ -117,7 +117,7 @@ pub fn start(
                     }
                     Err(err) => {
                         app_handle
-                            .emit_all(
+                            .emit(
                                 "scan_failed",
                                 format!("Failed to write scan error report: {err}"),
                             )
@@ -125,7 +125,7 @@ pub fn start(
                     }
                 },
                 Err(err) => {
-                    app_handle.emit_all("scan_failed", err).ok();
+                    app_handle.emit("scan_failed", err).ok();
                 }
             }
             ACTIVE_INCREMENTAL_SCANS
@@ -145,7 +145,9 @@ pub fn start(
     .expect("valid progress regex");
     let error_regex = Regex::new(r#"^\[error\] (\S+) "(.+)": (.+)$"#).expect("valid error regex");
 
-    let (mut rx, child) = TauriCommand::new_sidecar("pdu")
+    let (mut rx, child) = app_handle
+        .shell()
+        .sidecar("pdu")
         .expect("failed to create `my-sidecar` binary command")
         .args(paths_to_scan)
         .spawn()
@@ -163,7 +165,8 @@ pub fn start(
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(line) => {
-                    app_handle.emit_all("scan_finalizing", ()).ok();
+                    let line = String::from_utf8_lossy(&line);
+                    app_handle.emit("scan_finalizing", ()).ok();
                     let error_report = build_error_report(error_records.clone());
                     let normalized = normalize_pdu_content(&line);
                     match normalized.and_then(|content| {
@@ -172,7 +175,7 @@ pub fn start(
                         Ok(path) => match write_scan_error_report(&error_report) {
                             Ok(errors_path) => {
                                 app_handle
-                                    .emit_all(
+                                    .emit(
                                         "scan_completed",
                                         CompletedPayload {
                                             path: path.display().to_string(),
@@ -183,7 +186,7 @@ pub fn start(
                             }
                             Err(err) => {
                                 app_handle
-                                    .emit_all(
+                                    .emit(
                                         "scan_failed",
                                         format!("Failed to write scan error report: {err}"),
                                     )
@@ -192,15 +195,13 @@ pub fn start(
                         },
                         Err(err) => {
                             app_handle
-                                .emit_all(
-                                    "scan_failed",
-                                    format!("Failed to write scan result: {err}"),
-                                )
+                                .emit("scan_failed", format!("Failed to write scan result: {err}"))
                                 .ok();
                         }
                     }
                 }
                 CommandEvent::Stderr(line) => {
+                    let line = String::from_utf8_lossy(&line);
                     if let Some(captures) = progress_regex.captures(&line) {
                         items = captures
                             .get(1)
@@ -223,7 +224,10 @@ pub fn start(
                     // app_handle.unlisten(id);
                     // child.kill();
                 }
-                _ => unimplemented!(),
+                CommandEvent::Error(error) => {
+                    app_handle.emit("scan_failed", error).ok();
+                }
+                _ => {}
             };
             // if let CommandEvent::Stdout(line) = event {
             //     println!("StdErr: {}", line);
@@ -274,7 +278,7 @@ pub fn start(
     //             write!(text, ")").unwrap();
     //             println!("{}", text);
     //             app_handle
-    //                 .emit_all(
+    //                 .emit(
     //                     "scan_status",
     //                     Payload {
     //                         items: items,
@@ -350,7 +354,7 @@ fn emit_scan_status(
 ) {
     let counts = count_scan_errors(records);
     app_handle
-        .emit_all(
+        .emit(
             "scan_status",
             Payload {
                 items,
@@ -413,7 +417,7 @@ async fn incremental_scan(
     ratio: &str,
     ratio_arg: &str,
 ) -> Result<(PathBuf, ScanErrorReport), String> {
-    app_handle.emit_all("scan_incremental", ()).ok();
+    app_handle.emit("scan_incremental", ()).ok();
 
     let cached_path = cache_path(app_handle, scan_path, ratio)?;
     let index_path = cache_index_path(app_handle, scan_path, ratio)?;
@@ -540,7 +544,9 @@ async fn run_pdu_for_paths(
     let error_regex =
         Regex::new(r#"^\[error\] (\S+) "(.+)": (.+)$"#).map_err(|err| err.to_string())?;
 
-    let (mut rx, child) = TauriCommand::new_sidecar("pdu")
+    let (mut rx, child) = app_handle
+        .shell()
+        .sidecar("pdu")
         .map_err(|err| err.to_string())?
         .args(args)
         .spawn()
@@ -555,9 +561,10 @@ async fn run_pdu_for_paths(
     while let Some(event) = rx.recv().await {
         match event {
             CommandEvent::Stdout(line) => {
-                stdout = Some(line);
+                stdout = Some(String::from_utf8_lossy(&line).into_owned());
             }
             CommandEvent::Stderr(line) => {
+                let line = String::from_utf8_lossy(&line);
                 if let Some(captures) = progress_regex.captures(&line) {
                     items = captures
                         .get(1)
@@ -574,6 +581,7 @@ async fn run_pdu_for_paths(
                 }
             }
             CommandEvent::Terminated(_) => {}
+            CommandEvent::Error(error) => return Err(error),
             _ => {}
         }
     }
@@ -844,7 +852,7 @@ pub fn read_error_report(path: String) -> Result<String, String> {
     Ok(content)
 }
 
-fn register_child(state: &MyState, child: tauri::api::process::CommandChild) -> u32 {
+fn register_child(state: &MyState, child: tauri_plugin_shell::process::CommandChild) -> u32 {
     let pid = child.pid();
     state
         .0
@@ -932,9 +940,9 @@ fn cache_path(
     ratio.hash(&mut hasher);
     let key = hasher.finish();
     let cache_dir = app_handle
-        .path_resolver()
+        .path()
         .app_cache_dir()
-        .ok_or_else(|| "Could not resolve app cache directory".to_string())?;
+        .map_err(|_| "Could not resolve app cache directory".to_string())?;
     Ok(cache_dir.join("scans").join(format!("{key:016x}.json")))
 }
 

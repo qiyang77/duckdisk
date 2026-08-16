@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useLocation, useNavigate } from "../router";
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import * as d3 from "d3";
 import surfingDuck from "../assets/duck-disc-surf.png";
@@ -1009,6 +1009,13 @@ const Scanning = () => {
       setDeleteList([]);
       setDeletedIds(new Set());
       setScanPhase(scanNonce === 0 ? "checkingCache" : "scanning");
+
+      // A route change triggered by a click can run effects before WebKit paints the new page.
+      // Paint the waiting state first, then begin cache I/O and scan startup in the background.
+      await waitForUiPaint();
+      if (disposed) {
+        return;
+      }
 
       // Cached cloud and SSH scans can emit their completion events before
       // invoke() resolves, so every listener must be active before starting.

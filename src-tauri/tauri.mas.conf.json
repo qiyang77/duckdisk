@@ -2,51 +2,23 @@
   "build": {
     "beforeBuildCommand": "VITE_DISTRIBUTION=mas VITE_GOOGLE_DRIVE_ENABLED=false npm run build"
   },
-  "tauri": {
-    "allowlist": {
-      "dialog": {
-        "ask": true,
-        "confirm": true,
-        "open": true
-      },
-      "process": {
-        "relaunch": false
-      }
+  "identifier": "com.duckdisk.app",
+  "bundle": {
+    "category": "Utility",
+    "createUpdaterArtifacts": false,
+    "macOS": {
+      "entitlements": "entitlements.mas.plist",
+      "minimumSystemVersion": "12.0",
+      "signingIdentity": null
     },
-    "bundle": {
-      "category": "Utility",
-      "identifier": "com.duckdisk.app",
-      "macOS": {
-        "entitlements": "entitlements.mas.plist",
-        "minimumSystemVersion": "12.0",
-        "signingIdentity": null
-      },
-      "targets": [
-        "app"
-      ]
-    },
-    "updater": {
-      "active": false,
-      "endpoints": [],
-      "dialog": false,
-      "pubkey": ""
-    },
-    "macOSPrivateApi": false,
-    "windows": [
-      {
-        "fullscreen": false,
-        "height": 760,
-        "minHeight": 620,
-        "minWidth": 900,
-        "resizable": true,
-        "title": "DuckDisk",
-        "width": 1200,
-        "decorations": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
-        "transparent": false,
-        "center": true
-      }
+    "targets": [
+      "app"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [],
+      "pubkey": ""
+    }
   }
 }

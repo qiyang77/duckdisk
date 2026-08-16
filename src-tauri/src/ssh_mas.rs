@@ -13,7 +13,7 @@ use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use ssh2::{HashType, Session};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 static ACTIVE_SCANS: Lazy<Mutex<HashMap<String, Arc<AtomicBool>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
@@ -303,7 +303,7 @@ pub fn start_scan(
     if !force_full {
         if let Some(path) = copy_cached_result_to_temp(&app_handle, &connection_id)? {
             app_handle
-                .emit_all(
+                .emit(
                     "ssh_scan_incremental",
                     AccountPayload {
                         account_id: connection_id.clone(),
@@ -311,7 +311,7 @@ pub fn start_scan(
                 )
                 .ok();
             app_handle
-                .emit_all(
+                .emit(
                     "ssh_scan_completed",
                     CompletedPayload {
                         account_id: connection_id,
@@ -333,7 +333,7 @@ pub fn start_scan(
         active.insert(connection_id.clone(), cancelled.clone());
     }
     app_handle
-        .emit_all(
+        .emit(
             "ssh_scan_full",
             AccountPayload {
                 account_id: connection_id.clone(),
@@ -350,7 +350,7 @@ pub fn start_scan(
                     emit_scan_failure(&app_handle, &connection_id, message);
                 } else {
                     app_handle
-                        .emit_all(
+                        .emit(
                             "ssh_scan_finalizing",
                             AccountPayload {
                                 account_id: connection_id.clone(),
@@ -358,7 +358,7 @@ pub fn start_scan(
                         )
                         .ok();
                     app_handle
-                        .emit_all(
+                        .emit(
                             "ssh_scan_completed",
                             CompletedPayload {
                                 account_id: connection_id.clone(),
@@ -464,7 +464,7 @@ print(json.dumps({"deletedIds":deleted,"failures":failures}, separators=(",",":"
     let result: SshDeleteResult = serde_json::from_str(&output)
         .map_err(|err| format!("Remote deletion returned invalid JSON: {err}"))?;
     app_handle
-        .emit_all(
+        .emit(
             "ssh_delete_status",
             DeleteStatusPayload {
                 current: item_ids.len() as u64,
@@ -795,7 +795,7 @@ fn parse_progress(line: &str) -> Option<(u64, u64)> {
 
 fn emit_scan_status(app_handle: &tauri::AppHandle, connection_id: &str, items: u64, total: u64) {
     app_handle
-        .emit_all(
+        .emit(
             "ssh_scan_status",
             ScanStatusPayload {
                 account_id: connection_id.to_string(),
@@ -812,7 +812,7 @@ fn emit_scan_status(app_handle: &tauri::AppHandle, connection_id: &str, items: u
 
 fn emit_scan_failure(app_handle: &tauri::AppHandle, connection_id: &str, message: String) {
     app_handle
-        .emit_all(
+        .emit(
             "ssh_scan_failed",
             FailedPayload {
                 account_id: connection_id.to_string(),
@@ -834,10 +834,10 @@ fn find_connection(
 
 fn connections_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     app_handle
-        .path_resolver()
+        .path()
         .app_config_dir()
         .map(|path| path.join(CONNECTIONS_FILE))
-        .ok_or_else(|| "Could not resolve DuckDisk configuration directory".to_string())
+        .map_err(|_| "Could not resolve DuckDisk configuration directory".to_string())
 }
 
 fn read_connections(app_handle: &tauri::AppHandle) -> Result<Vec<SshConnection>, String> {
@@ -863,9 +863,9 @@ fn write_connections(
 
 fn cache_path(app_handle: &tauri::AppHandle, connection_id: &str) -> Result<PathBuf, String> {
     let directory = app_handle
-        .path_resolver()
+        .path()
         .app_cache_dir()
-        .ok_or_else(|| "Could not resolve DuckDisk cache directory".to_string())?
+        .map_err(|_| "Could not resolve DuckDisk cache directory".to_string())?
         .join("ssh");
     fs::create_dir_all(&directory).map_err(|err| err.to_string())?;
     Ok(directory.join(format!("{connection_id}.dual-size-v2-dataless.json")))

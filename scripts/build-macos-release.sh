@@ -41,8 +41,8 @@ else
 fi
 
 echo "Building and signing DuckDisk.app..."
-# Tauri 1.2 uses Apple's retired notarization uploader. Keep notarization
-# credentials away from the bundler and submit with notarytool below.
+# Keep notarization credentials away from the bundler and submit the cleaned,
+# re-signed app with notarytool below.
 env -u APPLE_ID -u APPLE_PASSWORD -u APPLE_TEAM_ID \
   npm run tauri -- build --bundles app
 

@@ -2,81 +2,55 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
-    "devPath": "http://localhost:1420",
-    "distDir": "../dist"
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420"
   },
-  "package": {
-    "productName": "DuckDisk",
-    "version": "0.6.1"
-  },
-  "tauri": {
-    "allowlist": {
-      "all": false,
-      "dialog": {
-        "all": false,
-        "ask": true,
-        "confirm": true,
-        "open": true
-      },
-      "process": {
-        "relaunch": true
-      },
-      "shell": {
-        "all": false,
-        "open": true
-      },
-      "window": {
-        "all": false,
-        "close": true,
-        "maximize": true,
-        "minimize": true,
-        "startDragging": true,
-        "unmaximize": true
-      }
+  "bundle": {
+    "active": true,
+    "category": "DeveloperTool",
+    "copyright": "Copyright (C) 2026 Qi Yang",
+    "shortDescription": "",
+    "externalBin": [
+      "bin/pdu"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/256x256.png",
+      "icons/icon.icns"
+    ],
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "longDescription": "",
+    "macOS": {
+      "entitlements": null,
+      "frameworks": [],
+      "providerShortName": null,
+      "signingIdentity": "-"
     },
-    "bundle": {
-      "active": true,
-      "category": "DeveloperTool",
-      "copyright": "Copyright (C) 2026 Qi Yang",
+    "resources": [],
+    "linux": {
       "deb": {
         "depends": []
-      },
-      "externalBin": [
-        "bin/pdu"
-      ],
-      "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/256x256.png",
-        "icons/icon.icns"
-      ],
-      "identifier": "com.duckdisk.dev",
-      "longDescription": "",
-      "macOS": {
-        "entitlements": null,
-        "frameworks": [],
-        "providerShortName": null,
-        "signingIdentity": "-"
-      },
-      "resources": [],
-      "shortDescription": "",
-      "targets": [
-        "app",
-        "dmg"
-      ]
+      }
     },
-    "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: https://asset.localhost data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
-    },
+    "createUpdaterArtifacts": "v1Compatible"
+  },
+  "productName": "DuckDisk",
+  "mainBinaryName": "DuckDisk",
+  "version": "0.6.1",
+  "identifier": "com.duckdisk.dev",
+  "plugins": {
     "updater": {
-      "active": true,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM2MDMyNDMyMkFBNDBBNQpSV1NsUUtvaVF6SmdBOXZkRWkyNUsrRkUvNG1BU0pZRUVhYngxL1YwMHQvYmN1MnJxMDRmSU9lZwo=",
       "endpoints": [
         "https://github.com/qiyang77/duckdisk/releases/latest/download/latest.json"
-      ],
-      "dialog": false,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM2MDMyNDMyMkFBNDBBNQpSV1NsUUtvaVF6SmdBOXZkRWkyNUsrRkUvNG1BU0pZRUVhYngxL1YwMHQvYmN1MnJxMDRmSU9lZwo="
-    },
-    "macOSPrivateApi": false,
+      ]
+    }
+  },
+  "app": {
     "windows": [
       {
         "fullscreen": false,
@@ -90,8 +64,13 @@
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "transparent": false,
-        "center": true
+        "center": true,
+        "useHttpsScheme": true
       }
-    ]
+    ],
+    "macOSPrivateApi": false,
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: https://asset.localhost data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
+    }
   }
 }
