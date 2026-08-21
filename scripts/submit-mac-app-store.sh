@@ -121,15 +121,23 @@ fi
 asc_request GET "/v1/appStoreVersions/$version_id/appStoreVersionLocalizations?limit=200"
 localizations="$(jq -c '.data' "$response_file")"
 
-if [[ "$(jq 'length' <<< "$localizations")" -eq 0 ]]; then
+previous_version_id=""
+find_previous_version_id() {
+  if [[ -n "$previous_version_id" ]]; then
+    return
+  fi
   asc_request GET "/v1/apps/$app_id/appStoreVersions?filter%5Bplatform%5D=MAC_OS&sort=-versionString&limit=20"
   previous_version_id="$(jq -r --arg current "$version_id" \
     'first(.data[] | select(.id != $current) | .id) // empty' \
     "$response_file")"
   if [[ -z "$previous_version_id" ]]; then
-    echo "No previous macOS version is available to copy localization metadata" >&2
+    echo "No previous macOS version is available to copy metadata" >&2
     exit 1
   fi
+}
+
+if [[ "$(jq 'length' <<< "$localizations")" -eq 0 ]]; then
+  find_previous_version_id
 
   asc_request GET "/v1/appStoreVersions/$previous_version_id/appStoreVersionLocalizations?limit=200"
   previous_localizations="$(jq -c '.data' "$response_file")"
@@ -189,8 +197,66 @@ else
     asc_request PATCH "/v1/appStoreVersionLocalizations/$localization_id" "$localization_body"
   done < <(jq -r '.[].id' <<< "$localizations")
 fi
+
+asc_request GET "/v1/appStoreVersions/$version_id/appStoreVersionLocalizations?limit=200"
+localizations="$(jq -c '.data' "$response_file")"
 echo "Updated What's New to: $whats_new"
 echo "Updated Promotional Text to: $promotional_text"
+
+asc_request GET "/v1/appStoreVersions/$version_id/relationships/appStoreReviewDetail"
+review_detail_id="$(jq -r '.data.id // empty' "$response_file")"
+if [[ -z "$review_detail_id" ]]; then
+  find_previous_version_id
+  asc_request GET "/v1/appStoreVersions/$previous_version_id/appStoreReviewDetail"
+  review_attributes="$(jq -c '
+    .data.attributes
+    | {
+        contactEmail,
+        contactFirstName,
+        contactLastName,
+        contactPhone,
+        demoAccountName,
+        demoAccountPassword,
+        demoAccountRequired,
+        notes
+      }
+    | with_entries(select(.value != null))
+  ' "$response_file")"
+  review_detail_body="$(jq -cn \
+    --argjson attributes "$review_attributes" \
+    --arg version_id "$version_id" \
+    '{
+      data: {
+        type: "appStoreReviewDetails",
+        attributes: $attributes,
+        relationships: {
+          appStoreVersion: {
+            data: { type: "appStoreVersions", id: $version_id }
+          }
+        }
+      }
+    }')"
+  asc_request POST "/v1/appStoreReviewDetails" "$review_detail_body"
+  review_detail_id="$(jq -er '.data.id' "$response_file")"
+  echo "Copied App Review details to version $version ($review_detail_id)"
+else
+  echo "Using existing App Review details $review_detail_id"
+fi
+
+missing_screenshot_locales=()
+while IFS=$'\t' read -r localization_id locale; do
+  asc_request GET "/v1/appStoreVersionLocalizations/$localization_id/relationships/appScreenshotSets?limit=200"
+  screenshot_set_count="$(jq '.data | length' "$response_file")"
+  echo "App Store localization $locale has $screenshot_set_count screenshot set(s)"
+  if [[ "$screenshot_set_count" -eq 0 ]]; then
+    missing_screenshot_locales+=("$locale")
+  fi
+done < <(jq -r '.[] | [.id, .attributes.locale] | @tsv' <<< "$localizations")
+
+if [[ "${#missing_screenshot_locales[@]}" -gt 0 ]]; then
+  echo "App Store version $version is missing screenshots for: ${missing_screenshot_locales[*]}" >&2
+  exit 1
+fi
 
 encoded_build_number="$(urlencode "$build_number")"
 build_id=""
