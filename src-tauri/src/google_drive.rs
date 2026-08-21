@@ -1279,7 +1279,7 @@ mod tests {
     }
 
     #[test]
-    fn shared_file_uses_quota_size_and_cannot_be_trashed() {
+    fn shared_file_is_excluded_from_quota_and_cannot_be_trashed() {
         let file: DriveFile = serde_json::from_value(json!({
             "id": "shared-file",
             "name": "archive.zip",
@@ -1296,6 +1296,25 @@ mod tests {
         assert_eq!(item.size, 0);
         assert!(!item.owned_by_me);
         assert!(!item.can_trash);
+    }
+
+    #[test]
+    fn owned_file_uses_quota_bytes_and_can_be_trashed() {
+        let file: DriveFile = serde_json::from_value(json!({
+            "id": "owned-file",
+            "name": "archive.zip",
+            "mimeType": "application/zip",
+            "quotaBytesUsed": "4096",
+            "ownedByMe": true,
+            "capabilities": { "canTrash": true }
+        }))
+        .unwrap();
+
+        let item = cached_item(file);
+
+        assert_eq!(item.size, 4096);
+        assert!(item.owned_by_me);
+        assert!(item.can_trash);
     }
 
     #[test]

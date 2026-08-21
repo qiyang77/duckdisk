@@ -1,7 +1,7 @@
 # DuckDisk
 
 <p align="center">
-  <img src="docs/assets/duckdisk-icon.png?v=0.6.1-media-6" alt="DuckDisk logo" width="144" height="144">
+  <img src="docs/assets/duckdisk-icon.png?v=0.6.2-media-6" alt="DuckDisk logo" width="144" height="144">
 </p>
 
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
@@ -18,19 +18,20 @@ The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
 Website: https://duckdisk.com/
 
-## What's New in v0.6.1
+## What's New in v0.6.2
 
-- Fixed several bugs.
+- Fixed freezes during scanning, navigation, and app shutdown.
+- Corrected Google Drive totals for shared files and disabled unavailable Trash actions.
 
 ## Screenshots
 
 ### Scan a Local Disk
 
-![DuckDisk local disk scan demo](docs/screenshots/local-scan.gif?v=0.6.1-media-6)
+![DuckDisk local disk scan demo](docs/screenshots/local-scan.gif?v=0.6.2-media-6)
 
 ### Drag to Remove Files
 
-![DuckDisk drag-to-remove demo](docs/screenshots/drag-remove.gif?v=0.6.1-media-6)
+![DuckDisk drag-to-remove demo](docs/screenshots/drag-remove.gif?v=0.6.2-media-6)
 
 ## Features
 

@@ -3,7 +3,7 @@ set -euo pipefail
 
 version="${1:?Pass the App Store version}"
 build_number="${2:?Pass the App Store build number}"
-whats_new="${3:-Fixed several bugs.}"
+whats_new="${3:-Fixed freezes during scanning and shutdown, and corrected Google Drive shared-file accounting.}"
 promotional_text="${4:-An informative, table-first storage analyzer for Mac, OneDrive, and SSH—built around dense, practical results.}"
 bundle_id="${MAS_BUNDLE_ID:-com.duckdisk.app}"
 api_root="https://api.appstoreconnect.apple.com"

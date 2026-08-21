@@ -19,6 +19,11 @@ fi
 : "${TAURI_PRIVATE_KEY:?Set TAURI_PRIVATE_KEY to sign automatic update artifacts}"
 : "${TAURI_KEY_PASSWORD:?Set TAURI_KEY_PASSWORD to sign automatic update artifacts}"
 
+# Tauri 2 renamed the updater signing variables. Keep the repository and
+# GitHub secret names stable while exporting the names consumed by the v2 CLI.
+export TAURI_SIGNING_PRIVATE_KEY="$TAURI_PRIVATE_KEY"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$TAURI_KEY_PASSWORD"
+
 version="$(node -p "require('./package.json').version")"
 arch="$(uname -m)"
 skip_notarization="${SKIP_NOTARIZATION:-0}"
@@ -87,7 +92,12 @@ COPYFILE_DISABLE=1 tar -czf "$updater_archive" -C "$work_dir" DuckDisk.app
 updater_key_file="$work_dir/duckdisk-updater.key"
 printf '%s' "$TAURI_PRIVATE_KEY" > "$updater_key_file"
 chmod 600 "$updater_key_file"
-"$root_dir/node_modules/.bin/tauri" signer sign \
+env \
+  -u TAURI_PRIVATE_KEY \
+  -u TAURI_KEY_PASSWORD \
+  -u TAURI_SIGNING_PRIVATE_KEY \
+  -u TAURI_SIGNING_PRIVATE_KEY_PASSWORD \
+  "$root_dir/node_modules/.bin/tauri" signer sign \
   --private-key-path "$updater_key_file" \
   --password "$TAURI_KEY_PASSWORD" \
   "$updater_archive"

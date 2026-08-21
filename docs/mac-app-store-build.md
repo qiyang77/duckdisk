@@ -11,16 +11,16 @@ DuckDisk uses one repository with two isolated release flavors.
 Build an ad-hoc signed sandboxed app without changing the direct-distribution manifest:
 
 ```bash
-MAS_SKIP_SIGNING=1 MAS_BUILD_NUMBER=512 npm run release:macos-store
+MAS_SKIP_SIGNING=1 MAS_BUILD_NUMBER=513 npm run release:macos-store
 ```
 
 The build is written as a ZIP archive to:
 
 ```text
-src-tauri/target/mas-store/DuckDisk-0.6.1-MAS-unsigned.zip
+src-tauri/target/mas-store/DuckDisk-0.6.2-MAS-unsigned.zip
 ```
 
-The script builds in an isolated temporary source tree because Tauri 1 statically couples `macos-private-api` to its configuration. This keeps the feature in direct builds and removes it from the MAS binary.
+The script builds in an isolated temporary source tree so it can disable the direct-distribution feature set and generate the sandboxed frontend without mutating the normal checkout.
 
 The app is signed and verified in the temporary local directory before it is archived. This avoids the Desktop/iCloud path attaching Finder metadata that invalidates a loose app bundle's signature. Extract the ZIP to `/Applications` or another local directory for manual testing.
 
@@ -45,7 +45,7 @@ npm run release:macos-store
 The resulting installer package is written to:
 
 ```text
-src-tauri/target/mas-store/DuckDisk-0.6.1-MAS.pkg
+src-tauri/target/mas-store/DuckDisk-0.6.2-MAS.pkg
 ```
 
 The `Mac App Store` GitHub Actions workflow imports the two distribution

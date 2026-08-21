@@ -21,7 +21,7 @@ on:
       whats_new:
         description: Text to use for What's New in every App Store localization
         required: false
-        default: "Fixed several bugs."
+        default: "Fixed freezes during scanning and shutdown, and corrected Google Drive shared-file accounting."
         type: string
       promotional_text:
         description: Promotional Text to use in every App Store localization
