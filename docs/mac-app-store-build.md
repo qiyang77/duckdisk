@@ -11,7 +11,7 @@ DuckDisk uses one repository with two isolated release flavors.
 Build an ad-hoc signed sandboxed app without changing the direct-distribution manifest:
 
 ```bash
-MAS_SKIP_SIGNING=1 MAS_BUILD_NUMBER=513 npm run release:macos-store
+MAS_SKIP_SIGNING=1 MAS_BUILD_NUMBER=514 npm run release:macos-store
 ```
 
 The build is written as a ZIP archive to:

@@ -78,6 +78,10 @@ ditto --noextattr --norsrc "$source_app" "$prepared_app"
 xattr -cr "$prepared_app"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" \
   "$prepared_app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" \
+  "$prepared_app/Contents/Info.plist" 2>/dev/null || \
+  /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" \
+    "$prepared_app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Delete :LSRequiresCarbon" \
   "$prepared_app/Contents/Info.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Delete :NSAppTransportSecurity" \

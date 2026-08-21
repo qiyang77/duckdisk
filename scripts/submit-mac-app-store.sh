@@ -136,6 +136,51 @@ find_previous_version_id() {
   fi
 }
 
+asc_request GET "/v1/appStoreVersions/$version_id?fields%5BappStoreVersions%5D=copyright,usesIdfa,appStoreState,appVersionState"
+current_copyright="$(jq -r '.data.attributes.copyright // empty' "$response_file")"
+current_uses_idfa="$(jq -r '
+  if .data.attributes.usesIdfa == null
+  then empty
+  else (.data.attributes.usesIdfa | tostring)
+  end
+' "$response_file")"
+app_store_state="$(jq -r '.data.attributes.appStoreState // .data.attributes.appVersionState // "UNKNOWN"' "$response_file")"
+
+if [[ -z "$current_copyright" || -z "$current_uses_idfa" ]]; then
+  find_previous_version_id
+  asc_request GET "/v1/appStoreVersions/$previous_version_id?fields%5BappStoreVersions%5D=copyright,usesIdfa"
+  previous_copyright="$(jq -r '.data.attributes.copyright // empty' "$response_file")"
+  previous_uses_idfa="$(jq -r '
+    if .data.attributes.usesIdfa == null
+    then "false"
+    else (.data.attributes.usesIdfa | tostring)
+    end
+  ' "$response_file")"
+  resolved_copyright="${current_copyright:-$previous_copyright}"
+  resolved_uses_idfa="${current_uses_idfa:-$previous_uses_idfa}"
+  if [[ -z "$resolved_copyright" ]]; then
+    echo "The App Store version is missing required copyright metadata" >&2
+    exit 1
+  fi
+  version_metadata_body="$(jq -cn \
+    --arg id "$version_id" \
+    --arg copyright "$resolved_copyright" \
+    --argjson uses_idfa "$resolved_uses_idfa" \
+    '{
+      data: {
+        type: "appStoreVersions",
+        id: $id,
+        attributes: {
+          copyright: $copyright,
+          usesIdfa: $uses_idfa
+        }
+      }
+    }')"
+  asc_request PATCH "/v1/appStoreVersions/$version_id" "$version_metadata_body"
+  echo "Copied required version metadata from the previous release"
+fi
+echo "App Store version $version state: $app_store_state"
+
 if [[ "$(jq 'length' <<< "$localizations")" -eq 0 ]]; then
   find_previous_version_id
 
@@ -293,6 +338,19 @@ if [[ -z "$build_id" ]]; then
   echo "Timed out waiting for App Store build $build_number" >&2
   exit 1
 fi
+
+asc_request GET "/v1/builds/$build_id?fields%5Bbuilds%5D=version,processingState,usesNonExemptEncryption"
+uses_non_exempt_encryption="$(jq -r '
+  if .data.attributes.usesNonExemptEncryption == null
+  then empty
+  else (.data.attributes.usesNonExemptEncryption | tostring)
+  end
+' "$response_file")"
+if [[ -z "$uses_non_exempt_encryption" ]]; then
+  echo "App Store build $build_number is missing export-compliance metadata; upload a new build with ITSAppUsesNonExemptEncryption set" >&2
+  exit 1
+fi
+echo "App Store build $build_number usesNonExemptEncryption=$uses_non_exempt_encryption"
 
 build_body="$(jq -cn \
   --arg build_id "$build_id" \
