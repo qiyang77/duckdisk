@@ -234,17 +234,66 @@ build_body="$(jq -cn \
 asc_request PATCH "/v1/appStoreVersions/$version_id/relationships/build" "$build_body"
 echo "Attached build $build_number ($build_id) to App Store version $version"
 
-submission_body="$(jq -cn \
-  --arg version_id "$version_id" \
-  '{
-    data: {
-      type: "appStoreVersionSubmissions",
-      relationships: {
-        appStoreVersion: {
-          data: { type: "appStoreVersions", id: $version_id }
+asc_request GET "/v1/apps/$app_id/reviewSubmissions?filter%5Bplatform%5D=MAC_OS&filter%5Bstate%5D=READY_FOR_REVIEW&limit=20"
+review_submission_id="$(jq -r '.data[0].id // empty' "$response_file")"
+
+if [[ -z "$review_submission_id" ]]; then
+  review_submission_body="$(jq -cn \
+    --arg app_id "$app_id" \
+    '{
+      data: {
+        type: "reviewSubmissions",
+        attributes: { platform: "MAC_OS" },
+        relationships: {
+          app: { data: { type: "apps", id: $app_id } }
         }
       }
+    }')"
+  asc_request POST "/v1/reviewSubmissions" "$review_submission_body"
+  review_submission_id="$(jq -er '.data.id' "$response_file")"
+  echo "Created review submission $review_submission_id"
+else
+  echo "Using existing review submission $review_submission_id"
+fi
+
+asc_request GET "/v1/reviewSubmissions/$review_submission_id/items?limit=200&include=appStoreVersion"
+version_is_in_submission="$(jq -r \
+  --arg version_id "$version_id" '
+    any(.data[]?; .relationships.appStoreVersion.data.id == $version_id)
+    or any(.included[]?; .type == "appStoreVersions" and .id == $version_id)
+  ' "$response_file")"
+
+if [[ "$version_is_in_submission" != "true" ]]; then
+  review_item_body="$(jq -cn \
+    --arg submission_id "$review_submission_id" \
+    --arg version_id "$version_id" \
+    '{
+      data: {
+        type: "reviewSubmissionItems",
+        relationships: {
+          reviewSubmission: {
+            data: { type: "reviewSubmissions", id: $submission_id }
+          },
+          appStoreVersion: {
+            data: { type: "appStoreVersions", id: $version_id }
+          }
+        }
+      }
+    }')"
+  asc_request POST "/v1/reviewSubmissionItems" "$review_item_body"
+  echo "Added App Store version $version to review submission $review_submission_id"
+else
+  echo "App Store version $version is already in review submission $review_submission_id"
+fi
+
+submit_body="$(jq -cn \
+  --arg submission_id "$review_submission_id" \
+  '{
+    data: {
+      type: "reviewSubmissions",
+      id: $submission_id,
+      attributes: { submitted: true }
     }
   }')"
-asc_request POST "/v1/appStoreVersionSubmissions" "$submission_body"
+asc_request PATCH "/v1/reviewSubmissions/$review_submission_id" "$submit_body"
 echo "Submitted DuckDisk $version (build $build_number) to App Review"
