@@ -126,9 +126,12 @@ find_previous_version_id() {
   if [[ -n "$previous_version_id" ]]; then
     return
   fi
-  asc_request GET "/v1/apps/$app_id/appStoreVersions?filter%5Bplatform%5D=MAC_OS&sort=-versionString&limit=20"
+  asc_request GET "/v1/apps/$app_id/appStoreVersions?filter%5Bplatform%5D=MAC_OS&limit=200"
   previous_version_id="$(jq -r --arg current "$version_id" \
-    'first(.data[] | select(.id != $current) | .id) // empty' \
+    '[.data[] | select(.id != $current)]
+    | sort_by(.attributes.createdDate)
+    | reverse
+    | .[0].id // empty' \
     "$response_file")"
   if [[ -z "$previous_version_id" ]]; then
     echo "No previous macOS version is available to copy metadata" >&2
