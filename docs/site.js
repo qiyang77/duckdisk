@@ -23,8 +23,10 @@ faqItems.forEach((item) => {
 });
 
 document.querySelectorAll("[data-download]").forEach((link) => {
+  const architecture =
+    link.dataset.downloadArch === "intel" ? "Intel" : "Apple Silicon";
   link.setAttribute(
     "aria-label",
-    "Download DuckDisk v0.6.2 for Apple Silicon macOS"
+    `Download DuckDisk v0.6.2 for ${architecture} macOS`
   );
 });

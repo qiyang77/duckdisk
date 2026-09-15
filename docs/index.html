@@ -44,7 +44,7 @@
         "description": "Open-source WizTree alternative for macOS with local, cloud, and SSH storage analysis.",
         "url": "https://duckdisk.com/",
         "image": "https://duckdisk.com/assets/duckdisk-icon.png?v=0.6.2",
-        "downloadUrl": "https://github.com/qiyang77/duckdisk/releases/download/v0.6.2/DuckDisk_0.6.2_arm64.dmg",
+        "downloadUrl": "https://github.com/qiyang77/duckdisk/releases/tag/v0.6.2",
         "installUrl": "https://apps.apple.com/app/duckdisk/id6798893880?mt=12",
         "sameAs": [
           "https://apps.apple.com/app/duckdisk/id6798893880?mt=12",
@@ -65,7 +65,7 @@
     </script>
 
     <link rel="stylesheet" href="styles.css?v=0.6.2-media-6">
-    <script src="site.js?v=0.6.2" defer></script>
+    <script src="site.js?v=0.6.2-intel-1" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -84,8 +84,7 @@
         </div>
         <a
           class="button button-small button-primary"
-          href="https://github.com/qiyang77/duckdisk/releases/download/v0.6.2/DuckDisk_0.6.2_arm64.dmg"
-          data-download
+          href="#install"
         >
           Download
         </a>
@@ -119,8 +118,17 @@
               class="button button-primary"
               href="https://github.com/qiyang77/duckdisk/releases/download/v0.6.2/DuckDisk_0.6.2_arm64.dmg"
               data-download
+              data-download-arch="apple-silicon"
             >
-              Direct Download
+              Apple Silicon
+            </a>
+            <a
+              class="button button-secondary"
+              href="https://github.com/qiyang77/duckdisk/releases/download/v0.6.2/DuckDisk_0.6.2_x86_64.dmg"
+              data-download
+              data-download-arch="intel"
+            >
+              Intel Mac
             </a>
             <a
               class="button button-secondary"
@@ -130,7 +138,10 @@
             </a>
           </div>
           <p class="download-meta">
-            Mac App Store or notarized DMG · Apple Silicon arm64 · Free and open source
+            Notarized DMG · Apple Silicon and Intel · Free and open source
+          </p>
+          <p class="download-note">
+            * Direct Download supports Apple Silicon and Intel. The current Mac App Store build supports Apple Silicon only.
           </p>
           <p class="download-note">
             * Mac App Store edition does not include Google Drive; Direct Download includes Google Drive.
@@ -388,8 +399,17 @@
               class="button button-primary"
               href="https://github.com/qiyang77/duckdisk/releases/download/v0.6.2/DuckDisk_0.6.2_arm64.dmg"
               data-download
+              data-download-arch="apple-silicon"
             >
-              Direct Download v0.6.2
+              Apple Silicon DMG
+            </a>
+            <a
+              class="button button-secondary"
+              href="https://github.com/qiyang77/duckdisk/releases/download/v0.6.2/DuckDisk_0.6.2_x86_64.dmg"
+              data-download
+              data-download-arch="intel"
+            >
+              Intel DMG
             </a>
             <a
               class="button button-secondary"
@@ -480,8 +500,17 @@
               class="button button-primary"
               href="https://github.com/qiyang77/duckdisk/releases/download/v0.6.2/DuckDisk_0.6.2_arm64.dmg"
               data-download
+              data-download-arch="apple-silicon"
             >
-              Direct Download
+              Apple Silicon
+            </a>
+            <a
+              class="button button-secondary"
+              href="https://github.com/qiyang77/duckdisk/releases/download/v0.6.2/DuckDisk_0.6.2_x86_64.dmg"
+              data-download
+              data-download-arch="intel"
+            >
+              Intel Mac
             </a>
           </div>
         </div>
