@@ -1,0 +1,221 @@
+name: Intel Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing release tag to supplement with Intel artifacts"
+        required: true
+        default: "v0.6.2"
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/intel-release.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  release-intel:
+    runs-on: macos-15-intel
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.release_tag || 'v0.6.2' }}
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Verify release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          test "$RELEASE_TAG" = "v${version}"
+          test "$(uname -m)" = "x86_64"
+
+      - name: Rust setup
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          key: intel-release
+
+      - name: Sync node version and setup cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "npm"
+
+      - name: Install app dependencies
+        run: npm ci
+
+      - name: Build Intel pdu sidecar
+        shell: bash
+        run: |
+          set -euo pipefail
+          pdu_version="0.23.0"
+          build_dir="$(mktemp -d "$RUNNER_TEMP/duckdisk-pdu.XXXXXX")"
+          git clone --quiet --depth 1 --branch "$pdu_version" \
+            https://github.com/KSXGitHub/parallel-disk-usage.git "$build_dir/source"
+          patch -d "$build_dir/source" -p1 < scripts/pdu-dual-size.patch
+          cargo build \
+            --manifest-path "$build_dir/source/Cargo.toml" \
+            --release \
+            --target x86_64-apple-darwin \
+            --bin pdu
+          install -m 755 \
+            "$build_dir/source/target/x86_64-apple-darwin/release/pdu" \
+            src-tauri/bin/pdu-x86_64-apple-darwin
+          file src-tauri/bin/pdu-x86_64-apple-darwin | grep -q 'x86_64'
+          src-tauri/bin/pdu-x86_64-apple-darwin --help | grep -q 'dual-size'
+
+      - name: Build web
+        run: npm run build
+
+      - name: Import Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          certificate_path="$RUNNER_TEMP/duckdisk-developer-id.p12"
+          keychain_path="$RUNNER_TEMP/duckdisk-intel-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$keychain_path"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$keychain_password" \
+            "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          rm -f "$certificate_path"
+          echo "DUCKDISK_SIGNING_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+
+      - name: Build, sign, and notarize Intel release
+        env:
+          DUCKDISK_GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_DRIVE_CLIENT_SECRET }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run release:macos
+          version="$(node -p "require('./package.json').version")"
+          dmg="src-tauri/target/release/bundle/dmg/DuckDisk_${version}_x86_64.dmg"
+          updater="src-tauri/target/release/bundle/updater/DuckDisk_${version}_x86_64.app.tar.gz"
+          signature="$updater.sig"
+          test -f "$dmg"
+          test -f "$updater"
+          test -f "$signature"
+          echo "DMG_PATH=$dmg" >> "$GITHUB_ENV"
+          echo "UPDATER_PATH=$updater" >> "$GITHUB_ENV"
+          echo "UPDATER_SIGNATURE_PATH=$signature" >> "$GITHUB_ENV"
+
+      - name: Verify Intel artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          verify_dir="$(mktemp -d "$RUNNER_TEMP/duckdisk-intel-verify.XXXXXX")"
+          mount_dir="$verify_dir/mount"
+          mkdir -p "$mount_dir"
+          hdiutil verify "$DMG_PATH"
+          hdiutil attach "$DMG_PATH" -nobrowse -mountpoint "$mount_dir"
+          trap 'hdiutil detach "$mount_dir" >/dev/null 2>&1 || true' EXIT
+          file "$mount_dir/DuckDisk.app/Contents/MacOS/DuckDisk" | grep -q 'x86_64'
+          file "$mount_dir/DuckDisk.app/Contents/MacOS/pdu" | grep -q 'x86_64'
+          codesign --verify --deep --strict --verbose=2 "$mount_dir/DuckDisk.app"
+          xcrun stapler validate "$mount_dir/DuckDisk.app"
+          spctl --assess --type execute --verbose=4 "$mount_dir/DuckDisk.app"
+          "$mount_dir/DuckDisk.app/Contents/MacOS/pdu" --version
+          hdiutil detach "$mount_dir"
+          trap - EXIT
+          xcrun stapler validate "$DMG_PATH"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG_PATH"
+
+      - name: Merge Intel updater entry
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_dir="$(mktemp -d "$RUNNER_TEMP/duckdisk-manifest.XXXXXX")"
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern latest.json \
+            --dir "$manifest_dir"
+          old_manifest="$manifest_dir/latest.json"
+          new_manifest="src-tauri/target/release/bundle/updater/latest.json"
+          arm_entry="$(jq -c '.platforms["darwin-aarch64"]' "$old_manifest")"
+          test "$arm_entry" != "null"
+          signature="$(cat "$UPDATER_SIGNATURE_PATH")"
+          updater_name="$(basename "$UPDATER_PATH")"
+          updater_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${updater_name}"
+          jq \
+            --arg signature "$signature" \
+            --arg url "$updater_url" \
+            '.platforms["darwin-x86_64"] = {signature: $signature, url: $url}' \
+            "$old_manifest" > "$new_manifest"
+          test "$(jq -c '.platforms["darwin-aarch64"]' "$new_manifest")" = "$arm_entry"
+          jq -e \
+            '.platforms["darwin-aarch64"].signature and
+             .platforms["darwin-aarch64"].url and
+             .platforms["darwin-x86_64"].signature and
+             .platforms["darwin-x86_64"].url' \
+            "$new_manifest" >/dev/null
+          echo "UPDATER_MANIFEST_PATH=$new_manifest" >> "$GITHUB_ENV"
+
+      - name: Upload Intel assets to existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            "$DMG_PATH" \
+            "$UPDATER_PATH" \
+            "$UPDATER_SIGNATURE_PATH" \
+            "$UPDATER_MANIFEST_PATH" \
+            --clobber
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DuckDisk-x86_64-release
+          path: |
+            ${{ env.DMG_PATH }}
+            ${{ env.UPDATER_PATH }}
+            ${{ env.UPDATER_SIGNATURE_PATH }}
+            ${{ env.UPDATER_MANIFEST_PATH }}
+
+      - name: Remove signing keychain
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${DUCKDISK_SIGNING_KEYCHAIN:-}" ]]; then
+            security delete-keychain "$DUCKDISK_SIGNING_KEYCHAIN" || true
+          fi
