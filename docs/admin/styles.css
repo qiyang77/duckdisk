@@ -1,0 +1,443 @@
+:root {
+  --ink: #102127;
+  --teal: #0b6674;
+  --teal-deep: #063f4d;
+  --cream: #fffaf1;
+  --mist: #e5f1f3;
+  --line: rgba(6, 63, 77, 0.14);
+  --shadow: 0 24px 70px rgba(4, 17, 22, 0.18);
+  --font: "Noto Sans SC", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --display: "Fraunces", Georgia, serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 10% 0%, rgba(239, 183, 107, 0.18), transparent 34%),
+    linear-gradient(135deg, #f6f0e6, #e5f1f3 54%, #d5e6ea);
+  font-family: var(--font);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button,
+select {
+  min-height: 42px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+button {
+  padding: 0 18px;
+  color: #fff;
+  background: var(--teal-deep);
+}
+
+select {
+  padding: 0 34px 0 14px;
+  color: var(--teal-deep);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.admin-shell {
+  min-height: 100vh;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.login-view {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: min(430px, 100%);
+  padding: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 24px;
+  background: rgba(255, 250, 241, 0.9);
+  box-shadow: var(--shadow);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.brand-mark {
+  display: block;
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.brand strong {
+  display: block;
+  color: var(--teal-deep);
+  font-size: 1rem;
+}
+
+.brand small {
+  color: rgba(6, 63, 77, 0.66);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.login-copy {
+  margin: 28px 0 18px;
+}
+
+.login-copy p,
+.section-title p {
+  margin: 0;
+  color: rgba(6, 63, 77, 0.66);
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+h1,
+h2 {
+  margin: 0;
+  color: var(--teal-deep);
+}
+
+h1 {
+  font-family: var(--display);
+  font-size: clamp(2.2rem, 8vw, 3.6rem);
+  line-height: 0.95;
+}
+
+h2 {
+  font-size: 0.96rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+label {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  color: rgba(6, 63, 77, 0.72);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+input {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0 14px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.login-card button {
+  width: 100%;
+  margin-top: 20px;
+}
+
+.form-message {
+  min-height: 22px;
+  margin: 14px 0 0;
+  color: #a44343;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.dashboard-view {
+  display: grid;
+  gap: 18px;
+  width: min(1480px, 100%);
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.dashboard-header,
+.metric-grid article,
+.map-section,
+.table-section {
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  border-radius: 18px;
+  background: rgba(255, 250, 241, 0.86);
+  box-shadow: 0 18px 46px rgba(4, 17, 22, 0.1);
+}
+
+.dashboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+}
+
+.dashboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.dashboard-actions button:last-child {
+  color: var(--teal-deep);
+  background: rgba(6, 63, 77, 0.1);
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metric-grid article {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+}
+
+.metric-grid span {
+  color: rgba(6, 63, 77, 0.64);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.metric-grid strong {
+  color: var(--teal-deep);
+  font-size: clamp(1.6rem, 4vw, 2.5rem);
+  line-height: 1;
+}
+
+.metric-grid article:last-child strong {
+  font-size: clamp(1rem, 2vw, 1.35rem);
+  line-height: 1.25;
+}
+
+.map-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 14px;
+  min-height: 540px;
+  padding: 14px;
+}
+
+.visit-map {
+  position: relative;
+  min-height: 512px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #d9edf1;
+}
+
+.visit-map .leaflet-pane,
+.visit-map .leaflet-tile,
+.visit-map .leaflet-marker-icon,
+.visit-map .leaflet-marker-shadow,
+.visit-map .leaflet-tile-container,
+.visit-map .leaflet-pane > svg,
+.visit-map .leaflet-pane > canvas,
+.visit-map .leaflet-zoom-box,
+.visit-map .leaflet-image-layer,
+.visit-map .leaflet-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.visit-map .leaflet-container {
+  overflow: hidden;
+}
+
+.side-panel {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.rank-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rank-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  min-height: 40px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(12, 107, 120, 0.08);
+  color: rgba(6, 63, 77, 0.78);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.rank-list small {
+  color: rgba(6, 63, 77, 0.54);
+}
+
+.table-section {
+  padding: 16px;
+}
+
+.section-title {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.54);
+}
+
+table {
+  width: 100%;
+  min-width: 1050px;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 12px;
+  border-bottom: 1px solid rgba(6, 63, 77, 0.1);
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  color: rgba(6, 63, 77, 0.62);
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+td {
+  color: rgba(16, 33, 39, 0.86);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+td small {
+  display: block;
+  margin-top: 3px;
+  color: rgba(16, 33, 39, 0.54);
+  font-weight: 700;
+}
+
+.leaflet-popup-content {
+  font-family: var(--font);
+  font-weight: 700;
+}
+
+.marker-dot {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  color: #fff;
+  background: #0b6674;
+  box-shadow: 0 8px 18px rgba(4, 17, 22, 0.28);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+@media (max-width: 980px) {
+  .dashboard-view {
+    padding: 14px;
+  }
+
+  .dashboard-header,
+  .section-title {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .map-section {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .visit-map {
+    min-height: 420px;
+  }
+}
+
+/* Match the DuckDisk website's charcoal and yellow palette. */
+:root { --ink:#f6f7f2; --teal:#ffd45a; --teal-deep:#ffd45a; --line:#3a4035; --font:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; --display:var(--font); color-scheme:dark; }
+body { background:radial-gradient(ellipse at 30% 0%,#282a1e 0,transparent 55%),#11130f; }
+.login-card,.dashboard-header,.metric-grid article,.map-section,.table-section { background:#1d211b; border:1px solid #3a4035; box-shadow:0 16px 48px #0002; border-radius:16px; }
+.brand-mark { border:0; background:transparent; border-radius:12px; }
+.brand small,.login-copy p,.section-title p,label,.metric-grid span,th,.rank-list small { color:#b7bdb0; }
+button { color:#171a15; background:#ffd45a; border-radius:9px; }
+button:disabled { opacity:.6; cursor:wait; }
+button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible { outline:2px solid #ffd45a; outline-offset:4px; }
+input,select { color:#f6f7f2; background:#11130f; border:1px solid #3a4035; border-radius:9px; }
+.dashboard-actions button:last-child { color:#f6f7f2; background:#30362b; }
+.form-message { color:#ff9b9b; font-weight:500; }
+#dashboard-message:empty { display:none; }
+.rank-list li { background:#282e24; color:#f6f7f2; }
+.rank-list small { display:block; }
+.table-wrap { background:#171a15; }
+td { color:#e5e8df; font-weight:400; max-width:280px; overflow-wrap:anywhere; }
+td small { color:#a2ab99; font-size:11px; }
+th,td { border-bottom-color:#30362b; }
+.marker-dot { background:#ffd45a; color:#11130f; border-color:#11130f; }
+.leaflet-popup-content { color:#11130f; }
+.data-note { color:#aab39f; font-size:12px; line-height:1.8; margin:0; }
+.data-note a { color:#ffd45a; }
+#updated-at { white-space:nowrap; }
+.visit-map { background:#cfdee0; }
+.metric-grid strong { font-variant-numeric:tabular-nums; }
+@media(max-width:560px) { .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .metric-grid article { padding:14px; } .dashboard-actions { gap:7px; } .login-card { padding:26px; } }

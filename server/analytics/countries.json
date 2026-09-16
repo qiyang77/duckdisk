@@ -1,0 +1,374 @@
+{
+  "AD": {
+    "name": "Andorra",
+    "zh": "安道尔",
+    "lat": 42.5,
+    "lng": 1.6
+  },
+  "AE": {
+    "name": "United Arab Emirates",
+    "zh": "阿联酋",
+    "lat": 24.4,
+    "lng": 54.3
+  },
+  "AR": {
+    "name": "Argentina",
+    "zh": "阿根廷",
+    "lat": -34.6,
+    "lng": -58.4
+  },
+  "AT": {
+    "name": "Austria",
+    "zh": "奥地利",
+    "lat": 47.5,
+    "lng": 14.5
+  },
+  "AU": {
+    "name": "Australia",
+    "zh": "澳大利亚",
+    "lat": -25.3,
+    "lng": 133.8
+  },
+  "BE": {
+    "name": "Belgium",
+    "zh": "比利时",
+    "lat": 50.8,
+    "lng": 4.5
+  },
+  "BG": {
+    "name": "Bulgaria",
+    "zh": "保加利亚",
+    "lat": 42.7,
+    "lng": 25.5
+  },
+  "BR": {
+    "name": "Brazil",
+    "zh": "巴西",
+    "lat": -10.8,
+    "lng": -53.1
+  },
+  "CA": {
+    "name": "Canada",
+    "zh": "加拿大",
+    "lat": 56.1,
+    "lng": -106.3
+  },
+  "CH": {
+    "name": "Switzerland",
+    "zh": "瑞士",
+    "lat": 46.8,
+    "lng": 8.2
+  },
+  "CL": {
+    "name": "Chile",
+    "zh": "智利",
+    "lat": -35.7,
+    "lng": -71.5
+  },
+  "CN": {
+    "name": "China",
+    "zh": "中国",
+    "lat": 35.9,
+    "lng": 104.2
+  },
+  "CO": {
+    "name": "Colombia",
+    "zh": "哥伦比亚",
+    "lat": 4.6,
+    "lng": -74.1
+  },
+  "CZ": {
+    "name": "Czechia",
+    "zh": "捷克",
+    "lat": 49.8,
+    "lng": 15.5
+  },
+  "DE": {
+    "name": "Germany",
+    "zh": "德国",
+    "lat": 51.2,
+    "lng": 10.5
+  },
+  "DK": {
+    "name": "Denmark",
+    "zh": "丹麦",
+    "lat": 56.3,
+    "lng": 9.5
+  },
+  "EE": {
+    "name": "Estonia",
+    "zh": "爱沙尼亚",
+    "lat": 58.6,
+    "lng": 25
+  },
+  "ES": {
+    "name": "Spain",
+    "zh": "西班牙",
+    "lat": 40.4,
+    "lng": -3.7
+  },
+  "FI": {
+    "name": "Finland",
+    "zh": "芬兰",
+    "lat": 64,
+    "lng": 26
+  },
+  "FR": {
+    "name": "France",
+    "zh": "法国",
+    "lat": 46.2,
+    "lng": 2.2
+  },
+  "GB": {
+    "name": "United Kingdom",
+    "zh": "英国",
+    "lat": 55.4,
+    "lng": -3.4
+  },
+  "GR": {
+    "name": "Greece",
+    "zh": "希腊",
+    "lat": 39.1,
+    "lng": 21.8
+  },
+  "HK": {
+    "name": "Hong Kong",
+    "zh": "香港",
+    "lat": 22.3,
+    "lng": 114.2
+  },
+  "HR": {
+    "name": "Croatia",
+    "zh": "克罗地亚",
+    "lat": 45.1,
+    "lng": 15.2
+  },
+  "HU": {
+    "name": "Hungary",
+    "zh": "匈牙利",
+    "lat": 47.2,
+    "lng": 19.5
+  },
+  "ID": {
+    "name": "Indonesia",
+    "zh": "印度尼西亚",
+    "lat": -2.5,
+    "lng": 118
+  },
+  "IE": {
+    "name": "Ireland",
+    "zh": "爱尔兰",
+    "lat": 53.4,
+    "lng": -8.2
+  },
+  "IL": {
+    "name": "Israel",
+    "zh": "以色列",
+    "lat": 31,
+    "lng": 35
+  },
+  "IN": {
+    "name": "India",
+    "zh": "印度",
+    "lat": 20.6,
+    "lng": 78.9
+  },
+  "IS": {
+    "name": "Iceland",
+    "zh": "冰岛",
+    "lat": 64.9,
+    "lng": -19
+  },
+  "IT": {
+    "name": "Italy",
+    "zh": "意大利",
+    "lat": 41.9,
+    "lng": 12.6
+  },
+  "JP": {
+    "name": "Japan",
+    "zh": "日本",
+    "lat": 36.2,
+    "lng": 138.3
+  },
+  "KR": {
+    "name": "South Korea",
+    "zh": "韩国",
+    "lat": 36.5,
+    "lng": 127.8
+  },
+  "LT": {
+    "name": "Lithuania",
+    "zh": "立陶宛",
+    "lat": 55.2,
+    "lng": 23.9
+  },
+  "LU": {
+    "name": "Luxembourg",
+    "zh": "卢森堡",
+    "lat": 49.8,
+    "lng": 6.1
+  },
+  "LV": {
+    "name": "Latvia",
+    "zh": "拉脱维亚",
+    "lat": 56.9,
+    "lng": 24.6
+  },
+  "MA": {
+    "name": "Morocco",
+    "zh": "摩洛哥",
+    "lat": 31.8,
+    "lng": -7.1
+  },
+  "MX": {
+    "name": "Mexico",
+    "zh": "墨西哥",
+    "lat": 23.6,
+    "lng": -102.5
+  },
+  "MY": {
+    "name": "Malaysia",
+    "zh": "马来西亚",
+    "lat": 4.2,
+    "lng": 102
+  },
+  "NL": {
+    "name": "Netherlands",
+    "zh": "荷兰",
+    "lat": 52.1,
+    "lng": 5.3
+  },
+  "NO": {
+    "name": "Norway",
+    "zh": "挪威",
+    "lat": 60.5,
+    "lng": 8.5
+  },
+  "NZ": {
+    "name": "New Zealand",
+    "zh": "新西兰",
+    "lat": -40.9,
+    "lng": 174.9
+  },
+  "PE": {
+    "name": "Peru",
+    "zh": "秘鲁",
+    "lat": -9.2,
+    "lng": -75
+  },
+  "PH": {
+    "name": "Philippines",
+    "zh": "菲律宾",
+    "lat": 12.9,
+    "lng": 122.8
+  },
+  "PL": {
+    "name": "Poland",
+    "zh": "波兰",
+    "lat": 52,
+    "lng": 19.1
+  },
+  "PT": {
+    "name": "Portugal",
+    "zh": "葡萄牙",
+    "lat": 39.4,
+    "lng": -8.2
+  },
+  "RO": {
+    "name": "Romania",
+    "zh": "罗马尼亚",
+    "lat": 45.9,
+    "lng": 24.9
+  },
+  "RS": {
+    "name": "Serbia",
+    "zh": "塞尔维亚",
+    "lat": 44,
+    "lng": 20.8
+  },
+  "RU": {
+    "name": "Russia",
+    "zh": "俄罗斯",
+    "lat": 61.5,
+    "lng": 105.3
+  },
+  "SA": {
+    "name": "Saudi Arabia",
+    "zh": "沙特阿拉伯",
+    "lat": 23.9,
+    "lng": 45.1
+  },
+  "SE": {
+    "name": "Sweden",
+    "zh": "瑞典",
+    "lat": 60.1,
+    "lng": 18.6
+  },
+  "SG": {
+    "name": "Singapore",
+    "zh": "新加坡",
+    "lat": 1.35,
+    "lng": 103.8
+  },
+  "SI": {
+    "name": "Slovenia",
+    "zh": "斯洛文尼亚",
+    "lat": 46.1,
+    "lng": 14.8
+  },
+  "SK": {
+    "name": "Slovakia",
+    "zh": "斯洛伐克",
+    "lat": 48.7,
+    "lng": 19.7
+  },
+  "TH": {
+    "name": "Thailand",
+    "zh": "泰国",
+    "lat": 15.9,
+    "lng": 101
+  },
+  "TR": {
+    "name": "Turkey",
+    "zh": "土耳其",
+    "lat": 39,
+    "lng": 35.2
+  },
+  "TW": {
+    "name": "Taiwan",
+    "zh": "台湾",
+    "lat": 23.7,
+    "lng": 121
+  },
+  "UA": {
+    "name": "Ukraine",
+    "zh": "乌克兰",
+    "lat": 49,
+    "lng": 31.4
+  },
+  "US": {
+    "name": "United States",
+    "zh": "美国",
+    "lat": 39.8,
+    "lng": -98.6
+  },
+  "VN": {
+    "name": "Vietnam",
+    "zh": "越南",
+    "lat": 14.1,
+    "lng": 108.3
+  },
+  "ZA": {
+    "name": "South Africa",
+    "zh": "南非",
+    "lat": -30.6,
+    "lng": 22.9
+  },
+  "XX": {
+    "name": "Unknown",
+    "zh": "未知",
+    "lat": 0,
+    "lng": 0
+  }
+}

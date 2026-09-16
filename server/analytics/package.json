@@ -1,0 +1,8 @@
+{
+  "name": "duckdisk-analytics",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": { "start": "node server.mjs", "test": "node --test server.test.mjs" },
+  "dependencies": { "maxmind": "5.0.0" }
+}

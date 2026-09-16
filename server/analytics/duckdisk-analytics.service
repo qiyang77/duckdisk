@@ -1,0 +1,23 @@
+[Unit]
+Description=DuckDisk website analytics
+After=network.target
+
+[Service]
+Type=simple
+User=duckanalytics
+Group=duckanalytics
+WorkingDirectory=/opt/duckdisk-analytics
+EnvironmentFile=/etc/duckdisk-analytics.env
+ExecStart=/usr/bin/node /opt/duckdisk-analytics/server.mjs
+Restart=on-failure
+RestartSec=3
+StateDirectory=duckdisk-analytics
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/duckdisk-analytics
+
+[Install]
+WantedBy=multi-user.target
