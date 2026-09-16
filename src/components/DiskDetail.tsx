@@ -3,6 +3,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useLocation, useNavigate } from "../router";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import * as d3 from "d3";
 import surfingDuck from "../assets/duck-disc-surf.png";
 import { formatBytes } from "../formatBytes";
@@ -1352,6 +1353,25 @@ const Scanning = () => {
     invoke("show_in_folder", { path: node.id }).catch(console.error);
   };
 
+  const copyFullPath = async (node: DiskItem) => {
+    try {
+      await writeText(node.id);
+      setRefreshNotice({ kind: "success", message: "Full path copied" });
+      window.setTimeout(() => {
+        setRefreshNotice((notice) =>
+          notice?.message === "Full path copied" ? null : notice
+        );
+      }, 2500);
+    } catch (error) {
+      setRefreshNotice({
+        kind: "error",
+        message: `Could not copy the full path: ${String(error)}`,
+      });
+    } finally {
+      setContextMenu(null);
+    }
+  };
+
   const startRescan = async () => {
     if (!isCloud && loadedFromCache) {
       await invoke("clear_cached_scan_result", { scanPath: disk, ratio }).catch(
@@ -2497,16 +2517,25 @@ const Scanning = () => {
             </button>
           )}
           {!isCloud && (
-            <button
-              role="menuitem"
-              onClick={() => {
-                reveal(contextMenu.node);
-                setContextMenu(null);
-              }}
-              className="context-menu-item"
-            >
-              Reveal in Finder
-            </button>
+            <>
+              <button
+                role="menuitem"
+                onClick={() => void copyFullPath(contextMenu.node)}
+                className="context-menu-item"
+              >
+                Copy Full Path
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  reveal(contextMenu.node);
+                  setContextMenu(null);
+                }}
+                className="context-menu-item"
+              >
+                Reveal in Finder
+              </button>
+            </>
           )}
           {canDelete && (
             <>
@@ -2615,9 +2644,10 @@ const Scanning = () => {
                     <button
                       onClick={() => invoke("open_full_disk_access_settings")}
                       className="button button-secondary"
+                      title="Open Full Disk Access in macOS System Settings"
                     >
                       <ShieldCheck size={14} />
-                      Grant Full Disk Access
+                      Full Disk Access Settings
                     </button>
                   )}
                 <button

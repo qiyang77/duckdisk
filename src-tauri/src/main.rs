@@ -27,6 +27,7 @@ use std::time::Duration;
 use sysinfo::{DiskExt, System, SystemExt};
 use tauri::Manager;
 use tauri_plugin_shell::process::CommandChild;
+use tauri_plugin_window_state::StateFlags;
 
 const INSTANCE_ADDRESS: &str = "127.0.0.1:53337";
 const INSTANCE_WAKE_REQUEST: &[u8] = b"DUCKDISK_ACTIVATE_V1";
@@ -67,6 +68,12 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
+                .build(),
+        )
         .setup(move |app| {
             if let Some(listener) = instance_listener {
                 start_instance_listener(listener, app.handle().clone());

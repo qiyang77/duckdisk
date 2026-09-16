@@ -1202,9 +1202,10 @@ const DiskList = () => {
             type="button"
             onClick={() => invoke("open_full_disk_access_settings")}
             className="button button-secondary"
+            title="Open Full Disk Access in macOS System Settings"
           >
             <ShieldCheck size={14} />
-            Grant Full Disk Access
+            Full Disk Access Settings
           </button>}
           <div className="version-label">v {appVersion}</div>
         </div>

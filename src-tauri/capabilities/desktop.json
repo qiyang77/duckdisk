@@ -9,6 +9,7 @@
     "main"
   ],
   "permissions": [
+    "clipboard-manager:allow-write-text",
     "updater:default"
   ]
 }
