@@ -6,7 +6,7 @@ on:
       build_number:
         description: App Store build number (must increase for every upload)
         required: true
-        default: "514"
+        default: "515"
         type: string
       upload:
         description: Upload the validated package to App Store Connect
@@ -21,7 +21,7 @@ on:
       whats_new:
         description: Text to use for What's New in every App Store localization
         required: false
-        default: "Fixed freezes during scanning and shutdown, and corrected Google Drive shared-file accounting."
+        default: "Added native Intel support, Copy Full Path, and window size and position restoration."
         type: string
       promotional_text:
         description: Promotional Text to use in every App Store localization
@@ -42,6 +42,8 @@ jobs:
       - name: Rust setup
         if: inputs.upload || !inputs.submit
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Rust cache
         if: inputs.upload || !inputs.submit

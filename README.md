@@ -20,6 +20,7 @@ Website: https://duckdisk.com/
 
 ## What's New in v0.6.3
 
+- Fixed opening deeply nested folders so clicking the folder name triggers the same on-demand scan as the expand control.
 - Added notarized native Intel builds and automatic updates for x86_64 Macs.
 - Added **Copy Full Path** to the local scan context menu.
 - Restored the previous window size, position, and maximized state at launch.

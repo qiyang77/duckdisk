@@ -11,13 +11,13 @@ DuckDisk uses one repository with two isolated release flavors.
 Build an ad-hoc signed sandboxed app without changing the direct-distribution manifest:
 
 ```bash
-MAS_SKIP_SIGNING=1 MAS_BUILD_NUMBER=514 npm run release:macos-store
+MAS_SKIP_SIGNING=1 MAS_BUILD_NUMBER=515 npm run release:macos-store
 ```
 
 The build is written as a ZIP archive to:
 
 ```text
-src-tauri/target/mas-store/DuckDisk-0.6.2-MAS-unsigned.zip
+src-tauri/target/mas-store/DuckDisk-0.6.3-MAS-unsigned.zip
 ```
 
 The script builds in an isolated temporary source tree so it can disable the direct-distribution feature set and generate the sandboxed frontend without mutating the normal checkout.
@@ -45,7 +45,7 @@ npm run release:macos-store
 The resulting installer package is written to:
 
 ```text
-src-tauri/target/mas-store/DuckDisk-0.6.2-MAS.pkg
+src-tauri/target/mas-store/DuckDisk-0.6.3-MAS.pkg
 ```
 
 The `Mac App Store` GitHub Actions workflow imports the two distribution
@@ -54,6 +54,11 @@ Connect. With the `submit` input enabled, it also waits for processing, creates
 the App Store version, copies localization metadata, sets the supplied
 `What's New` and `Promotional Text` values, attaches the build, and submits it
 to App Review.
+
+The MAS package is a Universal macOS app. Both the DuckDisk executable and the
+bundled `pdu` scanner contain native `arm64` and `x86_64` slices. The build
+script recreates the Universal `pdu` sidecar from the pinned patched source and
+verifies both architectures before and after signing.
 
 Create the App Store Connect app and Mac App Store provisioning profile for the explicit bundle ID `com.duckdisk.app`. The build script decodes the profile and refuses to sign if its bundle ID or Team ID does not match.
 

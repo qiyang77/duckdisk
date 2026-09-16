@@ -12,6 +12,8 @@ dist
 dist-ssr
 *.local
 src-tauri/gen/schemas
+src-tauri/bin/pdu-universal-apple-darwin
+src-tauri/bin/pdu-x86_64-apple-darwin
 
 # Editor directories and files
 .vscode/*

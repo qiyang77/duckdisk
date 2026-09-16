@@ -1440,9 +1440,9 @@ const Scanning = () => {
   const refreshNode = async (
     node: DiskItem,
     announce = true
-  ): Promise<boolean> => {
+  ): Promise<DiskItem | null> => {
     if (refreshingNodeId) {
-      return false;
+      return null;
     }
 
     setContextMenu(null);
@@ -1488,16 +1488,41 @@ const Scanning = () => {
           message: `${getNodeName(node)} updated`,
         });
       }
-      return true;
+      return refreshed;
     } catch (error) {
       setRefreshNotice({
         kind: "error",
         message: String(error),
       });
-      return false;
+      return null;
     } finally {
       setRefreshingNodeId(null);
     }
+  };
+
+  const hydrateDirectory = async (node: DiskItem) => {
+    const needsHydration =
+      canRefreshItem &&
+      isDirectory(node) &&
+      getChildren(node).length === 0 &&
+      !hydratedDirectoryIds.current.has(node.id);
+    if (!needsHydration) {
+      return node;
+    }
+
+    hydratedDirectoryIds.current.add(node.id);
+    const hydrated = await refreshNode(node, false);
+    if (!hydrated) {
+      hydratedDirectoryIds.current.delete(node.id);
+      return node;
+    }
+    return hydrated;
+  };
+
+  const openDirectory = async (node: DiskItem) => {
+    const hydrated = await hydrateDirectory(node);
+    setCurrentNode(hydrated);
+    setExpandedIds(new Set());
   };
 
   const toggleExpanded = async (node: DiskItem) => {
@@ -1511,20 +1536,7 @@ const Scanning = () => {
     }
 
     setExpandedIds((current) => new Set(current).add(node.id));
-    const needsHydration =
-      canRefreshItem &&
-      isDirectory(node) &&
-      getChildren(node).length === 0 &&
-      !hydratedDirectoryIds.current.has(node.id);
-    if (!needsHydration) {
-      return;
-    }
-
-    hydratedDirectoryIds.current.add(node.id);
-    const hydrated = await refreshNode(node, false);
-    if (!hydrated) {
-      hydratedDirectoryIds.current.delete(node.id);
-    }
+    await hydrateDirectory(node);
   };
 
   const startPointerDrag = (
@@ -2189,8 +2201,7 @@ const Scanning = () => {
                                 return;
                               }
                               if (directory) {
-                                setCurrentNode(node);
-                                setExpandedIds(new Set());
+                                void openDirectory(node);
                               } else {
                                 reveal(node);
                               }
@@ -2327,8 +2338,7 @@ const Scanning = () => {
                   type="button"
                   onClick={() => {
                     if (directory) {
-                      setCurrentNode(node);
-                      setExpandedIds(new Set());
+                      void openDirectory(node);
                     } else if (!isCloud) {
                       reveal(node);
                     }
@@ -2497,9 +2507,8 @@ const Scanning = () => {
             <button
               role="menuitem"
               onClick={() => {
-                setCurrentNode(contextMenu.node);
-                setExpandedIds(new Set());
                 setContextMenu(null);
+                void openDirectory(contextMenu.node);
               }}
               className="context-menu-item"
             >

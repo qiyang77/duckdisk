@@ -6,7 +6,8 @@ cd "$root_dir"
 
 export CI=true
 version="$(node -p "require('./package.json').version")"
-build_number="${MAS_BUILD_NUMBER:-512}"
+build_number="${MAS_BUILD_NUMBER:-515}"
+mas_target="universal-apple-darwin"
 store_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/duckdisk-mas.XXXXXX")"
 store_source_dir="$store_work_dir/source"
 store_output_dir="$root_dir/src-tauri/target/mas-store"
@@ -15,6 +16,8 @@ cleanup() {
   rm -rf "$store_work_dir"
 }
 trap cleanup EXIT
+
+bash "$root_dir/scripts/build-universal-pdu.sh"
 
 mkdir -p "$store_source_dir"
 rsync -a \
@@ -45,6 +48,7 @@ export CARGO_TARGET_DIR="$root_dir/src-tauri/target/mas"
       --ci \
       --features mas \
       --bundles app \
+      --target "$mas_target" \
       --config src-tauri/tauri.mas.conf.json
 )
 
@@ -54,8 +58,14 @@ export CARGO_TARGET_DIR="$root_dir/src-tauri/target/mas"
   cargo test --release --no-default-features --features mas
 )
 
-source_app="$CARGO_TARGET_DIR/release/bundle/macos/DuckDisk.app"
+source_app="$CARGO_TARGET_DIR/$mas_target/release/bundle/macos/DuckDisk.app"
 test -d "$source_app"
+
+for binary in \
+  "$source_app/Contents/MacOS/DuckDisk" \
+  "$source_app/Contents/MacOS/pdu"; do
+  lipo "$binary" -verify_arch arm64 x86_64
+done
 
 # App Review rejects binaries that link the private IOHID temperature APIs used
 # by sysinfo unless its Apple App Store compatibility feature is enabled. Scan
@@ -76,6 +86,11 @@ mkdir -p "$store_output_dir"
 prepared_app="$store_work_dir/DuckDisk.app"
 ditto --noextattr --norsrc "$source_app" "$prepared_app"
 xattr -cr "$prepared_app"
+for binary in \
+  "$prepared_app/Contents/MacOS/DuckDisk" \
+  "$prepared_app/Contents/MacOS/pdu"; do
+  lipo "$binary" -verify_arch arm64 x86_64
+done
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" \
   "$prepared_app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" \
@@ -110,6 +125,10 @@ if [[ "${MAS_SKIP_SIGNING:-0}" == "1" ]]; then
   verify_dir="$store_work_dir/verify-unsigned"
   mkdir -p "$verify_dir"
   ditto -x -k "$unsigned_zip" "$verify_dir"
+  lipo "$verify_dir/DuckDisk.app/Contents/MacOS/DuckDisk" \
+    -verify_arch arm64 x86_64
+  lipo "$verify_dir/DuckDisk.app/Contents/MacOS/pdu" \
+    -verify_arch arm64 x86_64
   codesign --verify --deep --strict --verbose=2 "$verify_dir/DuckDisk.app"
   echo "Ad-hoc signed MAS app archive: $unsigned_zip"
   exit 0
