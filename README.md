@@ -9,7 +9,7 @@
 [![website](https://img.shields.io/badge/website-duckdisk-blue)](https://duckdisk.com/)
 [![Mac App Store](https://img.shields.io/badge/Mac_App_Store-Download-black?logo=apple)](https://apps.apple.com/app/duckdisk/id6798893880?mt=12)
 ![platform](https://img.shields.io/badge/platform-macOS-black)
-![arch](https://img.shields.io/badge/arch-arm64-lightgrey)
+![arch](https://img.shields.io/badge/arch-arm64%20%7C%20x86__64-lightgrey)
 ![stack](https://img.shields.io/badge/stack-Tauri%20%7C%20Rust%20%7C%20React-orange)
 
 **DuckDisk** is an informative, table-first storage analyzer for macOS inspired by **WizTree-style** workflows. It scans disks, folders, OneDrive, Google Drive, and SSH paths, then keeps directory sizes, allocated space, parent percentages, file and folder counts, and file-type totals visible in one dense tree view.
@@ -18,10 +18,12 @@ The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
 Website: https://duckdisk.com/
 
-## What's New in v0.6.2
+## What's New in v0.6.3
 
-- Fixed freezes during scanning, navigation, and app shutdown.
-- Corrected Google Drive totals for shared files and disabled unavailable Trash actions.
+- Added notarized native Intel builds and automatic updates for x86_64 Macs.
+- Added **Copy Full Path** to the local scan context menu.
+- Restored the previous window size, position, and maximized state at launch.
+- Clarified the Full Disk Access settings shortcut after access has already been granted.
 
 ## Screenshots
 
@@ -51,7 +53,7 @@ Website: https://duckdisk.com/
 For accurate full-disk scans, grant DuckDisk Full Disk Access:
 
 1. Open DuckDisk.
-2. Click `Grant Full Disk Access`.
+2. Click `Full Disk Access Settings`.
 3. Enable DuckDisk in macOS Privacy & Security settings.
 4. Restart DuckDisk and rescan.
 
