@@ -27,6 +27,6 @@ document.querySelectorAll("[data-download]").forEach((link) => {
     link.dataset.downloadArch === "intel" ? "Intel" : "Apple Silicon";
   link.setAttribute(
     "aria-label",
-    `Download DuckDisk v0.6.2 for ${architecture} macOS`
+    `Download DuckDisk v0.6.3 for ${architecture} macOS`
   );
 });
