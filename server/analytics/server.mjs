@@ -25,11 +25,6 @@ function clientIP(req) {
   if (isIP(peer) && cloudflare.check(peer, isIP(peer) === 6 ? 'ipv6' : 'ipv4') && isIP(cf)) return cf;
   return isIP(peer) ? peer : 'unknown';
 }
-function maskIP(ip) {
-  if (isIP(ip) === 4) return ip.split('.').slice(0, 3).join('.') + '.0';
-  if (isIP(ip) === 6) return ip.split(':').slice(0, 3).join(':') + '::';
-  return 'unknown';
-}
 function device(ua) {
   const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Other';
   const os = /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Macintosh/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : 'Other';
@@ -59,7 +54,7 @@ export async function createApp(config) {
     CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, expires INTEGER NOT NULL);
   `);
   function prune() {
-    db.prepare('DELETE FROM visits WHERE occurredAt < ?').run(new Date(Date.now() - 90 * DAY).toISOString());
+    db.prepare('DELETE FROM visits WHERE occurredAt < ?').run(new Date(Date.now() - 365 * DAY).toISOString());
     db.prepare('DELETE FROM sessions WHERE expires < ?').run(Date.now());
   }
   prune();
@@ -131,7 +126,7 @@ export async function createApp(config) {
           const visitorId = createHmac('sha256', secret).update(`${now.slice(0, 10)}:${ip}:${ua}`).digest('hex').slice(0, 24);
           let referrer = '';
           try { const ref = new URL(clip(data.referrer, 2048)); if (['https:', 'http:'].includes(ref.protocol)) referrer = ref.origin; } catch {}
-          db.prepare('INSERT INTO visits (occurredAt,visitorId,page,referrer,language,ip,location,device) VALUES (?,?,?,?,?,?,?,?)').run(now, visitorId, data.page === '/index.html' ? '/' : data.page, referrer, clip(data.language, 32), maskIP(ip), JSON.stringify(locationFor(reader, ip)), JSON.stringify(device(ua)));
+          db.prepare('INSERT INTO visits (occurredAt,visitorId,page,referrer,language,ip,location,device) VALUES (?,?,?,?,?,?,?,?)').run(now, visitorId, data.page === '/index.html' ? '/' : data.page, referrer, clip(data.language, 32), ip, JSON.stringify(locationFor(reader, ip)), JSON.stringify(device(ua)));
           return respond(res, 200, { ok: true, tracked: true });
         }
       }
@@ -139,16 +134,22 @@ export async function createApp(config) {
         if (!session(req)) return respond(res, 401, { message: '请先登录' });
         const days = Number(url.searchParams.get('days') || 31);
         const limit = Number(url.searchParams.get('limit') || 300);
-        if (![7, 31, 90].includes(days) || !Number.isInteger(limit) || limit < 1 || limit > 1000) return respond(res, 400, { message: '统计范围无效' });
+        if (![7, 31, 180, 365].includes(days) || !Number.isInteger(limit) || limit < 1 || limit > 1000) return respond(res, 400, { message: '统计范围无效' });
         const endDate = new Date().toISOString().slice(0, 10);
         const startDate = new Date(Date.parse(endDate) - (days - 1) * DAY).toISOString().slice(0, 10);
         const start = startDate + 'T00:00:00.000Z';
         const totals = db.prepare('SELECT COUNT(*) pageviews, COUNT(DISTINCT visitorId) visits FROM visits WHERE occurredAt >= ?').get(start);
+        const dailyRows = db.prepare('SELECT substr(occurredAt,1,10) date, COUNT(DISTINCT visitorId) visitors, COUNT(*) pageviews FROM visits WHERE occurredAt >= ? GROUP BY date ORDER BY date').all(start);
+        const dailyByDate = new Map(dailyRows.map(row => [row.date, row]));
+        const daily = Array.from({ length: days }, (_, index) => {
+          const date = new Date(Date.parse(startDate) + index * DAY).toISOString().slice(0, 10);
+          return dailyByDate.get(date) || { date, visitors: 0, pageviews: 0 };
+        });
         const pages = db.prepare('SELECT page, COUNT(*) pageviews FROM visits WHERE occurredAt >= ? GROUP BY page ORDER BY pageviews DESC').all(start);
         const regions = db.prepare(`SELECT json_extract(location,'$.countryCode') code, json_extract(location,'$.country') name, json_extract(location,'$.countryZh') zh, COUNT(*) pageviews FROM visits WHERE occurredAt >= ? GROUP BY code ORDER BY pageviews DESC`).all(start);
         const locations = db.prepare('SELECT location, COUNT(*) pageviews FROM visits WHERE occurredAt >= ? GROUP BY location').all(start).map(row => ({ ...row, location: JSON.parse(row.location) }));
         const events = db.prepare('SELECT * FROM visits WHERE occurredAt >= ? ORDER BY id DESC LIMIT ?').all(start, limit).map(row => ({ ...row, location: JSON.parse(row.location), device: JSON.parse(row.device) }));
-        return respond(res, 200, { summary: { ...totals, countries: regions, startDate, endDate }, pages, events, locations });
+        return respond(res, 200, { summary: { ...totals, countries: regions, startDate, endDate }, pages, events, locations, daily });
       }
       respond(res, 404, { message: '接口不存在' });
     } catch (error) {

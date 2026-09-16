@@ -7,7 +7,7 @@
     <title>DuckDisk Admin</title>
     <link rel="icon" href="/assets/duckdisk-icon.png" />
     <link rel="stylesheet" href="/admin/vendor/leaflet.css?v=1.9.4" />
-    <link rel="stylesheet" href="/admin/styles.css?v=20260917b" />
+    <link rel="stylesheet" href="/admin/styles.css?v=20260917c" />
   </head>
   <body>
     <main class="admin-shell">
@@ -53,7 +53,8 @@
             <select id="range-select" aria-label="统计时间范围">
               <option value="7">7 天</option>
               <option value="31" selected>31 天</option>
-              <option value="90">90 天</option>
+              <option value="180">180 天</option>
+              <option value="365">365 天</option>
             </select>
             <button id="refresh-button" type="button">刷新</button>
             <button id="logout-button" type="button">退出</button>
@@ -80,7 +81,19 @@
           </article>
         </section>
 
-        <p class="data-note">仅统计启用后的真实访问，保留 90 天。访客数按每日匿名标识估算；地图为 IP 近似位置。<span id="updated-at"></span></p>
+        <p class="data-note">仅统计启用后的真实访问，保留 365 天。访客数按每日匿名标识估算；地图为 IP 近似位置。<span id="updated-at"></span></p>
+        <section class="chart-section" aria-labelledby="visitors-chart-title">
+          <div class="section-title">
+            <div>
+              <h2 id="visitors-chart-title">访客数量趋势</h2>
+              <p class="chart-description">每日访客数 · UTC · 当日数据持续更新</p>
+            </div>
+            <span id="chart-summary" class="chart-summary"></span>
+          </div>
+          <div id="visitors-chart" class="visitors-chart"></div>
+          <p id="chart-detail" class="chart-detail" aria-live="polite"></p>
+          <p class="data-note">移动鼠标或点按查看每日数量；键盘左右方向键切换日期。未记录访问的日期显示 0，统计启用前无历史数据。</p>
+        </section>
         <section class="map-section">
           <div id="visit-map" class="visit-map" aria-label="访客位置地图"></div>
           <aside class="side-panel">
@@ -107,7 +120,7 @@
                   <th>时间</th>
                   <th>页面</th>
                   <th>位置</th>
-                  <th>IP（已脱敏）</th>
+                  <th>IP</th>
                   <th>设备</th>
                   <th>来源</th>
                 </tr>
@@ -119,6 +132,6 @@
       </section>
     </main>
     <script src="/admin/vendor/leaflet.js?v=1.9.4"></script>
-    <script src="/admin/admin.js?v=20260917b"></script>
+    <script src="/admin/admin.js?v=20260917c"></script>
   </body>
 </html>

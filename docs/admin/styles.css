@@ -445,3 +445,15 @@ th,td { border-bottom-color:#30362b; }
 .dashboard-view > *, .map-section > *, .table-wrap { min-width:0; }
 .rank-list li span { overflow-wrap:anywhere; }
 @media(max-width:980px) { .map-section { grid-template-columns:minmax(0,1fr); } }
+
+.chart-section { padding:20px; border:1px solid #3a4035; border-radius:16px; background:#1d211b; box-shadow:0 16px 48px #0002; }
+.chart-section .section-title { align-items:center; }
+.chart-section .chart-description { margin-top:8px; font-size:12px; letter-spacing:0; font-weight:400; text-transform:none; }
+.chart-summary { color:#ffd45a; font-size:12px; font-variant-numeric:tabular-nums; }
+.visitors-chart { width:100%; min-width:0; }
+.visitors-chart svg { display:block; width:100%; height:248px; overflow:visible; outline-offset:3px; }
+.visitors-chart svg:focus-visible { outline:2px solid #ffd45a; border-radius:4px; }
+.visitors-chart text { fill:#aab39f; font:11px var(--font); }
+.chart-grid { stroke:#343b2f; stroke-width:1; }
+.chart-detail { color:#f6f7f2; font-size:13px; font-variant-numeric:tabular-nums; min-height:20px; margin:10px 0 6px; }
+@media(max-width:560px) { .chart-section { padding:16px 12px; } .chart-section .section-title { align-items:flex-start; } }

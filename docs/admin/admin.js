@@ -14,6 +14,11 @@
   const pageList = document.getElementById("page-list");
   const visitTable = document.getElementById("visit-table");
   const tableNote = document.getElementById("table-note");
+  const chartNode = document.getElementById("visitors-chart");
+  const chartDetail = document.getElementById("chart-detail");
+  let chartSeries = [];
+  let selectedDay = 0;
+  let chartGeometry;
 
   let map;
   let markerLayer;
@@ -77,6 +82,7 @@
   function formatDate(value) {
     if (!value) return "-";
     return new Date(`${value}T12:00:00Z`).toLocaleDateString("zh-CN", {
+      year: "numeric",
       month: "short",
       day: "numeric",
     });
@@ -183,6 +189,68 @@
       : `<tr><td colspan="6">暂无访问记录</td></tr>`;
   }
 
+  function selectChartDay(index) {
+    if (!chartSeries.length || !chartGeometry) return;
+    selectedDay = Math.max(0, Math.min(chartSeries.length - 1, index));
+    const day = chartSeries[selectedDay];
+    const { x, y, top, bottom } = chartGeometry;
+    const dot = chartNode.querySelector(".chart-selected");
+    const guide = chartNode.querySelector(".chart-guide");
+    dot.setAttribute("cx", x(selectedDay));
+    dot.setAttribute("cy", y(day.visitors));
+    guide.setAttribute("d", `M${x(selectedDay)},${top} V${bottom}`);
+    chartDetail.textContent = `${day.date} · ${day.visitors.toLocaleString()} 位访客 · ${day.pageviews.toLocaleString()} 次浏览`;
+  }
+
+  function drawChart() {
+    if (!chartSeries.length || dashboardView.hidden) return;
+    const width = Math.max(260, chartNode.clientWidth);
+    const height = 248, left = 42, right = width - 16, top = 18, bottom = height - 34;
+    const peak = Math.max(...chartSeries.map(day => day.visitors));
+    const step = Math.max(1, Math.ceil(peak / 4));
+    const max = step * 4;
+    const x = index => left + index / Math.max(1, chartSeries.length - 1) * (right - left);
+    const y = count => bottom - count / max * (bottom - top);
+    chartGeometry = { x, y, left, right, top, bottom };
+    const points = chartSeries.map((day, i) => `${x(i)},${y(day.visitors)}`).join(" L");
+    const ticks = Array.from({ length: 5 }, (_, i) => {
+      const value = step * i;
+      return `<line x1="${left}" y1="${y(value)}" x2="${right}" y2="${y(value)}" class="chart-grid"/><text x="${left - 10}" y="${y(value) + 4}" text-anchor="end">${value.toLocaleString()}</text>`;
+    }).join("");
+    const labelCount = width < 500 ? 3 : 6;
+    const labels = Array.from({ length: labelCount }, (_, i) => {
+      const index = Math.round(i / (labelCount - 1) * (chartSeries.length - 1));
+      return `<text x="${x(index)}" y="${height - 8}" text-anchor="${i === 0 ? "start" : i === labelCount - 1 ? "end" : "middle"}">${escapeHtml(chartSeries[index].date.slice(5).replace("-", "/"))}</text>`;
+    }).join("");
+    chartNode.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" tabindex="0" aria-label="每日访客数量折线图，左右方向键选择日期">
+      <title>${escapeHtml(chartSeries[0].date)} 至 ${escapeHtml(chartSeries.at(-1).date)}，每日最高 ${peak} 位访客</title>
+      <defs><linearGradient id="visitor-fill" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#ffd45a" stop-opacity=".2"/><stop offset="1" stop-color="#ffd45a" stop-opacity="0"/></linearGradient></defs>
+      ${ticks}${labels}
+      <path d="M${left},${bottom} L${points} L${right},${bottom} Z" fill="url(#visitor-fill)"/>
+      <path d="M${points}" fill="none" stroke="#ffd45a" stroke-width="2.5" stroke-linejoin="round"/>
+      <path class="chart-guide" stroke="#b7bdb0" stroke-dasharray="3 5" fill="none"/>
+      <circle class="chart-selected" r="5" fill="#ffd45a" stroke="#1d211b" stroke-width="2"/>
+    </svg>`;
+    document.getElementById("chart-summary").textContent = `日均 ${(chartSeries.reduce((sum, day) => sum + day.visitors, 0) / chartSeries.length).toFixed(1)} · 单日最高 ${peak.toLocaleString()}`;
+    selectChartDay(selectedDay);
+  }
+
+  function pointChart(event) {
+    if (!chartGeometry) return;
+    const bounds = chartNode.getBoundingClientRect();
+    const { left, right } = chartGeometry;
+    const index = Math.round((event.clientX - bounds.left - left) / (right - left) * (chartSeries.length - 1));
+    selectChartDay(index);
+  }
+  chartNode.addEventListener("pointermove", pointChart);
+  chartNode.addEventListener("pointerdown", pointChart);
+  chartNode.addEventListener("keydown", event => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    selectChartDay(event.key === "Home" ? 0 : event.key === "End" ? chartSeries.length - 1 : selectedDay + (event.key === "ArrowRight" ? 1 : -1));
+  });
+  new ResizeObserver(drawChart).observe(chartNode);
+
   function render(payload) {
     const summary = payload.summary || {};
     const countries = summary.countries || [];
@@ -191,6 +259,9 @@
     metricVisitors.textContent = summary.visits || 0;
     metricRegions.textContent = countries.filter(c => c.code !== "XX").length;
     metricRange.textContent = `${formatDate(summary.startDate)} - ${formatDate(summary.endDate)}`;
+    chartSeries = payload.daily || [];
+    selectedDay = chartSeries.length - 1;
+    drawChart();
     renderRankList(countryList, countries.map((country) => ({
       name: country.zh || country.name,
       sub: country.code,

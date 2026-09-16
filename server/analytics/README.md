@@ -32,10 +32,14 @@ overwrite X-Real-IP with the connecting peer address; keep the API loopback-only
 
 The tracking endpoint accepts only known public pages and same-origin requests.
 It excludes known bots and DNT/GPC requests. No analytics cookies or browser
-storage are used. IPs are masked before storage, referrers contain only origins,
+storage are used. Full IP addresses are retained in administrator-only records, referrers contain only origins,
 and pseudonymous visitor identifiers rotate each UTC day. The visitor metric
 is therefore a sum of daily estimated unique visitors, not cross-day people.
-All records expire after 90 days (hourly cleanup). Maps and ranks use the full
+All records expire after 365 days (hourly cleanup). Maps and ranks use the full
 selected period; the detail table shows the latest 300 visits. Authentication
 uses 12-hour Secure/HttpOnly/SameSite cookies, revocable server-side sessions,
 scrypt password verification, and login throttling.
+
+The admin supports 7/31/180/365-day ranges and a zero-filled UTC daily visitor
+series. Daily visitors are deduplicated independently of pageviews. Older
+masked IPs cannot be recovered; full IP retention applies to new visits.
