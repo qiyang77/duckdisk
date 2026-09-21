@@ -31,7 +31,8 @@ Only Cloudflare source addresses may supply CF-Connecting-IP. Nginx must always
 overwrite X-Real-IP with the connecting peer address; keep the API loopback-only.
 
 The tracking endpoint accepts only known public pages and same-origin requests.
-It excludes known bots and DNT/GPC requests. No analytics cookies or browser
+It excludes DNT/GPC requests. Known bots are retained in recent visits, but
+excluded from metrics, the daily chart, maps and rankings. No analytics cookies or browser
 storage are used. Full IP addresses are retained in administrator-only records, referrers contain only origins,
 and pseudonymous visitor identifiers rotate each UTC day. The visitor metric
 is therefore a sum of daily estimated unique visitors, not cross-day people.
@@ -43,3 +44,9 @@ scrypt password verification, and login throttling.
 The admin supports 7/31/180/365-day ranges and a zero-filled UTC daily visitor
 series. Daily visitors are deduplicated independently of pageviews. Older
 masked IPs cannot be recovered; full IP retention applies to new visits.
+
+Bot status is a User-Agent heuristic, not verified crawler identity. New records
+retain their bounded User-Agent and nullable isBot classification; legacy rows
+and missing User-Agents display Unknown. Startup migrates existing SQLite tables
+without inventing classifications. Bots that never execute the page tracker or
+call the tracking endpoint are not captured by this client-side analytics.

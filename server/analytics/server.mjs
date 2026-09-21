@@ -25,6 +25,11 @@ function clientIP(req) {
   if (isIP(peer) && cloudflare.check(peer, isIP(peer) === 6 ? 'ipv6' : 'ipv4') && isIP(cf)) return cf;
   return isIP(peer) ? peer : 'unknown';
 }
+// Heuristic only: a matching User-Agent is not proof of a verified crawler.
+export function classifyBot(ua) {
+  if (!ua.trim()) return null;
+  return /bot|crawler|spider|headless|curl|wget|python-requests|python-urllib|httpx|aiohttp|scrapy|selenium|playwright|puppeteer|phantomjs|go-http-client|libwww-perl|apache-httpclient|node-fetch|undici/i.test(ua);
+}
 function device(ua) {
   const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Other';
   const os = /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Macintosh/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : 'Other';
@@ -53,6 +58,10 @@ export async function createApp(config) {
     CREATE INDEX IF NOT EXISTS visits_time ON visits(occurredAt);
     CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, expires INTEGER NOT NULL);
   `);
+  // Nullable status preserves uncertainty for records collected before classification.
+  const columns = new Set(db.prepare('PRAGMA table_info(visits)').all().map(column => column.name));
+  if (!columns.has('isBot')) db.exec('ALTER TABLE visits ADD COLUMN isBot INTEGER CHECK (isBot IN (0, 1))');
+  if (!columns.has('userAgent')) db.exec("ALTER TABLE visits ADD COLUMN userAgent TEXT NOT NULL DEFAULT ''");
   function prune() {
     db.prepare('DELETE FROM visits WHERE occurredAt < ?').run(new Date(Date.now() - 365 * DAY).toISOString());
     db.prepare('DELETE FROM sessions WHERE expires < ?').run(Date.now());
@@ -121,13 +130,14 @@ export async function createApp(config) {
           const data = await body(req);
           if (!allowedPages.has(data.page)) return respond(res, 400, { message: '页面无效' });
           const ua = clip(req.headers['user-agent'], 512);
-          if (req.headers.dnt === '1' || req.headers['sec-gpc'] === '1' || /bot|crawler|spider|headless|curl|wget/i.test(ua)) return respond(res, 200, { ok: true, tracked: false });
+          if (req.headers.dnt === '1' || req.headers['sec-gpc'] === '1') return respond(res, 200, { ok: true, tracked: false });
+          const isBot = classifyBot(ua);
           const now = new Date().toISOString();
           const visitorId = createHmac('sha256', secret).update(`${now.slice(0, 10)}:${ip}:${ua}`).digest('hex').slice(0, 24);
           let referrer = '';
           try { const ref = new URL(clip(data.referrer, 2048)); if (['https:', 'http:'].includes(ref.protocol)) referrer = ref.origin; } catch {}
-          db.prepare('INSERT INTO visits (occurredAt,visitorId,page,referrer,language,ip,location,device) VALUES (?,?,?,?,?,?,?,?)').run(now, visitorId, data.page === '/index.html' ? '/' : data.page, referrer, clip(data.language, 32), ip, JSON.stringify(locationFor(reader, ip)), JSON.stringify(device(ua)));
-          return respond(res, 200, { ok: true, tracked: true });
+          db.prepare('INSERT INTO visits (occurredAt,visitorId,page,referrer,language,ip,location,device,isBot,userAgent) VALUES (?,?,?,?,?,?,?,?,?,?)').run(now, visitorId, data.page === '/index.html' ? '/' : data.page, referrer, clip(data.language, 32), ip, JSON.stringify(locationFor(reader, ip)), JSON.stringify(device(ua)), isBot === null ? null : Number(isBot), ua);
+          return respond(res, 200, { ok: true, tracked: true, isBot });
         }
       }
       if (req.method === 'GET' && url.pathname === '/api/admin/visits') {
@@ -138,17 +148,17 @@ export async function createApp(config) {
         const endDate = new Date().toISOString().slice(0, 10);
         const startDate = new Date(Date.parse(endDate) - (days - 1) * DAY).toISOString().slice(0, 10);
         const start = startDate + 'T00:00:00.000Z';
-        const totals = db.prepare('SELECT COUNT(*) pageviews, COUNT(DISTINCT visitorId) visits FROM visits WHERE occurredAt >= ?').get(start);
-        const dailyRows = db.prepare('SELECT substr(occurredAt,1,10) date, COUNT(DISTINCT visitorId) visitors, COUNT(*) pageviews FROM visits WHERE occurredAt >= ? GROUP BY date ORDER BY date').all(start);
+        const totals = db.prepare('SELECT COUNT(*) pageviews, COUNT(DISTINCT visitorId) visits FROM visits WHERE occurredAt >= ? AND isBot IS NOT 1').get(start);
+        const dailyRows = db.prepare('SELECT substr(occurredAt,1,10) date, COUNT(DISTINCT visitorId) visitors, COUNT(*) pageviews FROM visits WHERE occurredAt >= ? AND isBot IS NOT 1 GROUP BY date ORDER BY date').all(start);
         const dailyByDate = new Map(dailyRows.map(row => [row.date, row]));
         const daily = Array.from({ length: days }, (_, index) => {
           const date = new Date(Date.parse(startDate) + index * DAY).toISOString().slice(0, 10);
           return dailyByDate.get(date) || { date, visitors: 0, pageviews: 0 };
         });
-        const pages = db.prepare('SELECT page, COUNT(*) pageviews FROM visits WHERE occurredAt >= ? GROUP BY page ORDER BY pageviews DESC').all(start);
-        const regions = db.prepare(`SELECT json_extract(location,'$.countryCode') code, json_extract(location,'$.country') name, json_extract(location,'$.countryZh') zh, COUNT(*) pageviews FROM visits WHERE occurredAt >= ? GROUP BY code ORDER BY pageviews DESC`).all(start);
-        const locations = db.prepare('SELECT location, COUNT(*) pageviews FROM visits WHERE occurredAt >= ? GROUP BY location').all(start).map(row => ({ ...row, location: JSON.parse(row.location) }));
-        const events = db.prepare('SELECT * FROM visits WHERE occurredAt >= ? ORDER BY id DESC LIMIT ?').all(start, limit).map(row => ({ ...row, location: JSON.parse(row.location), device: JSON.parse(row.device) }));
+        const pages = db.prepare('SELECT page, COUNT(*) pageviews FROM visits WHERE occurredAt >= ? AND isBot IS NOT 1 GROUP BY page ORDER BY pageviews DESC').all(start);
+        const regions = db.prepare(`SELECT json_extract(location,'$.countryCode') code, json_extract(location,'$.country') name, json_extract(location,'$.countryZh') zh, COUNT(*) pageviews FROM visits WHERE occurredAt >= ? AND isBot IS NOT 1 GROUP BY code ORDER BY pageviews DESC`).all(start);
+        const locations = db.prepare('SELECT location, COUNT(*) pageviews FROM visits WHERE occurredAt >= ? AND isBot IS NOT 1 GROUP BY location').all(start).map(row => ({ ...row, location: JSON.parse(row.location) }));
+        const events = db.prepare('SELECT * FROM visits WHERE occurredAt >= ? ORDER BY id DESC LIMIT ?').all(start, limit).map(row => ({ ...row, isBot: row.isBot === null ? null : Boolean(row.isBot), location: JSON.parse(row.location), device: JSON.parse(row.device) }));
         return respond(res, 200, { summary: { ...totals, countries: regions, startDate, endDate }, pages, events, locations, daily });
       }
       respond(res, 404, { message: '接口不存在' });

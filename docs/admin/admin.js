@@ -180,13 +180,14 @@
               <td>${formatDateTime(event.occurredAt)}<small>${escapeHtml(event.visitorId || "")}</small></td>
               <td>${escapeHtml(event.page || "/")}<small>${escapeHtml(event.language || "")}</small></td>
               <td>${escapeHtml(locationLabel(loc))}<small>${escapeHtml(`${loc.lat ?? ""}, ${loc.lng ?? ""} · ${loc.precision || ""}`)}</small></td>
+              <td><span class="bot-status ${event.isBot === true ? 'is-bot' : event.isBot === false ? 'is-human' : 'is-unknown'}">${event.isBot === true ? '是' : event.isBot === false ? '否' : '未知'}</span><small>${event.isBot === true ? '匹配 Bot 特征' : event.isBot === false ? '未匹配 Bot 特征' : '无识别信息'}</small></td>
               <td>${escapeHtml(event.ip || "")}<small>${escapeHtml(event.ipHash || "")}</small></td>
               <td>${escapeHtml([device.device, device.os, device.browser].filter(Boolean).join(" / "))}<small>${escapeHtml(event.userAgent || "")}</small></td>
               <td>${escapeHtml(event.referrer || "-")}</td>
             </tr>
           `;
         }).join("")
-      : `<tr><td colspan="6">暂无访问记录</td></tr>`;
+      : `<tr><td colspan="7">暂无访问记录</td></tr>`;
   }
 
   function selectChartDay(index) {

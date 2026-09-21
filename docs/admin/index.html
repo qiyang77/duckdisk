@@ -7,7 +7,7 @@
     <title>DuckDisk Admin</title>
     <link rel="icon" href="/assets/duckdisk-icon.png" />
     <link rel="stylesheet" href="/admin/vendor/leaflet.css?v=1.9.4" />
-    <link rel="stylesheet" href="/admin/styles.css?v=20260917c" />
+    <link rel="stylesheet" href="/admin/styles.css?v=20260921a" />
   </head>
   <body>
     <main class="admin-shell">
@@ -109,6 +109,7 @@
         </section>
 
         <section class="table-section">
+          <p class="data-note bot-note">Bot 根据 User-Agent 特征识别，可能存在误判。历史记录无识别信息时显示“未知”。明细包含 Bot，统计与折线图排除已识别的 Bot。</p>
           <div class="section-title">
             <h2>最近访问</h2>
             <p id="table-note">显示最近 300 条访问记录</p>
@@ -120,6 +121,7 @@
                   <th>时间</th>
                   <th>页面</th>
                   <th>位置</th>
+                  <th>Bot</th>
                   <th>IP</th>
                   <th>设备</th>
                   <th>来源</th>
@@ -132,6 +134,6 @@
       </section>
     </main>
     <script src="/admin/vendor/leaflet.js?v=1.9.4"></script>
-    <script src="/admin/admin.js?v=20260917c"></script>
+    <script src="/admin/admin.js?v=20260921a"></script>
   </body>
 </html>

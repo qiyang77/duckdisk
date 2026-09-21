@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createApp } from './server.mjs';
+import { createApp, classifyBot } from './server.mjs';
 const salt = '0123456789abcdef0123456789abcdef';
 const password = 'test-only-password';
 await test('authentication, statistics, privacy, logout and throttling', async t => {
@@ -52,6 +52,21 @@ await test('authentication, statistics, privacy, logout and throttling', async t
   const ipv6 = await (await request('/api/admin/visits?days=7', null, {Cookie})).json();
   assert.equal(ipv6.events[0].ip, '2001:db8:abcd:1234:5678:90ab:cdef:1234');
   assert.equal(ipv6.daily.at(-1).visitors, 2);
+  assert.equal(ipv6.events[0].isBot, false);
+  assert.match(ipv6.events[0].userAgent, /Safari/);
+  for (const userAgent of ['Googlebot/2.1', 'HeadlessChrome/130', 'curl/8.0', 'python-requests/2.32']) {
+    const tracked = await (await request('/api/visits/track', visit, {'User-Agent':userAgent})).json();
+    assert.equal(tracked.tracked, true);
+    assert.equal(tracked.isBot, true);
+  }
+  const bots = await (await request('/api/admin/visits?days=7', null, {Cookie})).json();
+  assert.equal(bots.events.filter(event => event.isBot === true).length, 4);
+  assert.equal(bots.events.length, ipv6.events.length + 4);
+  assert.deepEqual(bots.summary, ipv6.summary);
+  assert.deepEqual(bots.daily, ipv6.daily);
+  assert.deepEqual(bots.pages, ipv6.pages);
+  assert.deepEqual(bots.locations, ipv6.locations);
+  assert.equal((await (await request('/api/visits/track', visit, {'User-Agent':'Googlebot', 'Sec-GPC':'1'})).json()).tracked, false);
   await request('/api/auth/logout',{}, {Cookie});
   assert.equal((await request('/api/admin/visits',null,{Cookie})).status,401);
   for(let i=0;i<10;i++) await request('/api/auth/login',{email:'admin@duckdisk.com',password:'wrong'},{'X-Real-IP':'1.2.3.4'});
@@ -63,10 +78,9 @@ await test('year-long retention and daily aggregation across range boundaries', 
   t.after(() => rmSync(dir, {recursive:true, force:true}));
   const dbPath = join(dir, 'visits.sqlite');
   const config = {dbPath, secret:'a'.repeat(64), passwordHash:`${salt}:${scryptSync(password, salt, 64).toString('hex')}`};
-  const initial = await createApp(config);
-  await new Promise(resolve => initial.listen(0, '127.0.0.1', resolve));
-  await new Promise(resolve => initial.close(resolve));
+  // A pre-classification production schema must migrate without relabeling history.
   const db = new DatabaseSync(dbPath);
+  db.exec('CREATE TABLE visits (id INTEGER PRIMARY KEY, occurredAt TEXT NOT NULL, visitorId TEXT NOT NULL, page TEXT NOT NULL, referrer TEXT NOT NULL, language TEXT NOT NULL, ip TEXT NOT NULL, location TEXT NOT NULL, device TEXT NOT NULL)');
   const today = new Date().toISOString().slice(0,10);
   const dateAgo = n => new Date(Date.parse(today) - n * 86400000).toISOString().slice(0,10);
   const insert = db.prepare('INSERT INTO visits (occurredAt,visitorId,page,referrer,language,ip,location,device) VALUES (?,?,?,?,?,?,?,?)');
@@ -87,9 +101,18 @@ await test('year-long retention and daily aggregation across range boundaries', 
     assert.equal(result.summary.pageviews,activeDays*3);
     assert.equal(result.daily.reduce((sum,day)=>sum+day.visitors,0),result.summary.visits);
     assert.equal(result.daily.filter(day=>day.visitors===2).length,activeDays);
+    assert.equal(result.events[0].isBot, null);
+    assert.equal(result.events[0].userAgent, '');
     assert.equal(result.events.length,1); // Chart aggregation is independent of the detail limit.
   }
   const verify = new DatabaseSync(dbPath);
   assert.equal(verify.prepare('SELECT COUNT(*) count FROM visits').get().count,24);
   verify.close();
+});
+
+test('bot classifier distinguishes browser, automation and absent identification', () => {
+  assert.equal(classifyBot('Mozilla/5.0 Macintosh Chrome/130 Safari/537.36'), false);
+  assert.equal(classifyBot('Mozilla/5.0 (compatible; bingbot/2.0)'), true);
+  assert.equal(classifyBot('facebookexternalhit/1.1 crawler'), true);
+  assert.equal(classifyBot(''), null);
 });

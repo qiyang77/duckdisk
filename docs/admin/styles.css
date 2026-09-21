@@ -457,3 +457,9 @@ th,td { border-bottom-color:#30362b; }
 .chart-grid { stroke:#343b2f; stroke-width:1; }
 .chart-detail { color:#f6f7f2; font-size:13px; font-variant-numeric:tabular-nums; min-height:20px; margin:10px 0 6px; }
 @media(max-width:560px) { .chart-section { padding:16px 12px; } .chart-section .section-title { align-items:flex-start; } }
+
+.bot-note { margin-bottom:12px; }
+.bot-status { display:inline-block; padding:3px 9px; border-radius:6px; font-weight:700; white-space:nowrap; }
+.bot-status.is-bot { color:#ffd45a; background:#ffd45a1a; }
+.bot-status.is-human { color:#7fe4a7; background:#55d68a18; }
+.bot-status.is-unknown { color:#b7bdb0; background:#b7bdb012; }
