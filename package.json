@@ -1,7 +1,7 @@
 {
   "name": "duckdisk-tauri",
   "private": true,
-  "version": "0.6.3",
+  "version": "0.6.4",
   "author": "Qi Yang <qiyang577@gmail.com>",
   "license": "AGPL-3.0-or-later",
   "repository": {
@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test:scan-totals": "node scripts/test-scan-totals.mjs",
     "preview": "vite preview",
     "tauri": "bash scripts/tauri.sh",
     "release:macos": "bash scripts/build-macos-release.sh",

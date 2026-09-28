@@ -36,7 +36,7 @@ struct Payload {
     other: u64,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ScanErrorRecord {
     operation: String,
@@ -45,7 +45,7 @@ struct ScanErrorRecord {
     kind: String,
 }
 
-#[derive(Clone, Default, Serialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ScanErrorCounts {
     operation_not_permitted: u64,
@@ -54,7 +54,7 @@ struct ScanErrorCounts {
     other: u64,
 }
 
-#[derive(Clone, Default, Serialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ScanErrorReport {
     counts: ScanErrorCounts,
@@ -68,6 +68,14 @@ struct CacheIndex {
     scan_path: String,
     ratio: String,
     children: Vec<CacheIndexEntry>,
+}
+
+const CACHE_INDEX_VERSION: &str = "duckdisk-cache-index-v5-preserve-deduplicated-totals";
+
+impl CacheIndex {
+    fn matches_scan(&self, scan_path: &str, ratio: &str) -> bool {
+        self.version == CACHE_INDEX_VERSION && self.scan_path == scan_path && self.ratio == ratio
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -202,19 +210,14 @@ pub fn start(
                 }
                 CommandEvent::Stderr(line) => {
                     let line = String::from_utf8_lossy(&line);
-                    if let Some(captures) = progress_regex.captures(&line) {
-                        items = captures
-                            .get(1)
-                            .and_then(|matched| matched.as_str().parse::<u64>().ok())
-                            .unwrap_or_default();
-                        total = captures
-                            .get(2)
-                            .and_then(|matched| matched.as_str().parse::<u64>().ok())
-                            .unwrap_or_default();
-
-                        emit_scan_status(&app_handle, items, total, &error_records);
-                    } else if let Some(record) = parse_scan_error(&error_regex, &line) {
-                        error_records.push(record);
+                    if collect_scan_stderr(
+                        &line,
+                        &progress_regex,
+                        &error_regex,
+                        &mut items,
+                        &mut total,
+                        &mut error_records,
+                    ) {
                         emit_scan_status(&app_handle, items, total, &error_records);
                     }
                 }
@@ -379,6 +382,41 @@ fn parse_scan_error(regex: &Regex, line: &str) -> Option<ScanErrorRecord> {
     })
 }
 
+fn collect_scan_stderr(
+    chunk: &str,
+    progress_regex: &Regex,
+    error_regex: &Regex,
+    items: &mut u64,
+    total: &mut u64,
+    error_records: &mut Vec<ScanErrorRecord>,
+) -> bool {
+    let mut changed = false;
+    // pdu updates progress with carriage returns. A shell stderr event may contain
+    // several progress updates followed by an error before its newline.
+    for segment in chunk
+        .split(['\r', '\n'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if let Some(captures) = progress_regex.captures(segment) {
+            *items = captures
+                .get(1)
+                .and_then(|matched| matched.as_str().parse::<u64>().ok())
+                .unwrap_or_default();
+            *total = captures
+                .get(2)
+                .and_then(|matched| matched.as_str().parse::<u64>().ok())
+                .unwrap_or_default();
+            changed = true;
+        }
+        if let Some(record) = parse_scan_error(error_regex, segment) {
+            error_records.push(record);
+            changed = true;
+        }
+    }
+    changed
+}
+
 fn classify_scan_error(reason: &str) -> &'static str {
     if reason.contains("Operation not permitted") {
         "operationNotPermitted"
@@ -411,6 +449,26 @@ fn build_error_report(records: Vec<ScanErrorRecord>) -> ScanErrorReport {
     }
 }
 
+fn merge_scan_error_reports(
+    cached: ScanErrorReport,
+    refreshed: ScanErrorReport,
+    changed_paths: &[String],
+    removed_paths: &HashSet<String>,
+) -> ScanErrorReport {
+    let mut records = cached.records;
+    records.retain(|record| {
+        let path = Path::new(&record.path);
+        !changed_paths
+            .iter()
+            .any(|changed| path.starts_with(Path::new(changed)))
+            && !removed_paths
+                .iter()
+                .any(|removed| path.starts_with(Path::new(removed)))
+    });
+    records.extend(refreshed.records);
+    build_error_report(records)
+}
+
 async fn incremental_scan(
     app_handle: &tauri::AppHandle,
     scan_path: &str,
@@ -424,6 +482,9 @@ async fn incremental_scan(
     let cached_content = fs::read_to_string(&cached_path).map_err(|err| err.to_string())?;
     let index_content = fs::read_to_string(&index_path).map_err(|err| err.to_string())?;
     let index: CacheIndex = serde_json::from_str(&index_content).map_err(|err| err.to_string())?;
+    if !index.matches_scan(scan_path, ratio) {
+        return Err("The cached scan index is outdated; run a full rescan".to_string());
+    }
     let mut cached_json: Value =
         serde_json::from_str(&cached_content).map_err(|err| err.to_string())?;
 
@@ -438,7 +499,7 @@ async fn incremental_scan(
         .map(|entry| entry.path.clone())
         .collect();
 
-    let mut changed_paths: Vec<String> = current_entries
+    let changed_paths: Vec<String> = current_entries
         .iter()
         .filter(|entry| {
             index
@@ -460,13 +521,20 @@ async fn incremental_scan(
         .map(|path| path.to_string())
         .collect();
 
+    let cached_report = read_cached_error_report(app_handle, scan_path, ratio)?
+        .and_then(|content| serde_json::from_str::<ScanErrorReport>(&content).ok())
+        .unwrap_or_default();
     let error_report = if changed_paths.is_empty() {
-        build_error_report(Vec::new())
+        merge_scan_error_reports(
+            cached_report,
+            ScanErrorReport::default(),
+            &changed_paths,
+            &removed_paths,
+        )
     } else {
         let (scan_json, report) = run_pdu_for_paths(app_handle, ratio_arg, &changed_paths).await?;
         merge_changed_children(&mut cached_json, scan_path, &removed_paths, &scan_json)?;
-        changed_paths.clear();
-        report
+        merge_scan_error_reports(cached_report, report, &changed_paths, &removed_paths)
     };
 
     if !removed_paths.is_empty() && changed_paths.is_empty() {
@@ -495,7 +563,7 @@ pub async fn refresh_path(
     }
 
     let ratio_arg = format!("--min-ratio={ratio}");
-    let (scan_json, _) =
+    let (scan_json, refreshed_report) =
         run_pdu_for_paths(app_handle, &ratio_arg, &[target_path.to_string()]).await?;
     let refreshed =
         scan_json.ok_or_else(|| "The selected item could not be scanned".to_string())?;
@@ -504,6 +572,8 @@ pub async fn refresh_path(
     let cached_path = cache_path(app_handle, scan_path, ratio)?;
     if target == scan_root {
         write_cached_result(app_handle, scan_path, ratio, &refreshed_content)?;
+        let report = serde_json::to_string(&refreshed_report).map_err(|err| err.to_string())?;
+        write_cached_error_report(app_handle, scan_path, ratio, &report)?;
         return Ok(refreshed_content);
     }
 
@@ -521,9 +591,19 @@ pub async fn refresh_path(
         if !replace_cached_subtree(cached_tree, scan_root, target, refreshed_tree) {
             return Err("The selected item is no longer present in the cached scan".to_string());
         }
-        recalculate_tree_sizes(cached_tree);
         let merged_content = serde_json::to_string(&cached_json).map_err(|err| err.to_string())?;
         write_cached_result(app_handle, scan_path, ratio, &merged_content)?;
+        let cached_report = read_cached_error_report(app_handle, scan_path, ratio)?
+            .and_then(|content| serde_json::from_str::<ScanErrorReport>(&content).ok())
+            .unwrap_or_default();
+        let merged_report = merge_scan_error_reports(
+            cached_report,
+            refreshed_report,
+            &[target_path.to_string()],
+            &HashSet::new(),
+        );
+        let report = serde_json::to_string(&merged_report).map_err(|err| err.to_string())?;
+        write_cached_error_report(app_handle, scan_path, ratio, &report)?;
     }
 
     Ok(refreshed_content)
@@ -565,18 +645,14 @@ async fn run_pdu_for_paths(
             }
             CommandEvent::Stderr(line) => {
                 let line = String::from_utf8_lossy(&line);
-                if let Some(captures) = progress_regex.captures(&line) {
-                    items = captures
-                        .get(1)
-                        .and_then(|matched| matched.as_str().parse::<u64>().ok())
-                        .unwrap_or_default();
-                    total = captures
-                        .get(2)
-                        .and_then(|matched| matched.as_str().parse::<u64>().ok())
-                        .unwrap_or_default();
-                    emit_scan_status(app_handle, items, total, &error_records);
-                } else if let Some(record) = parse_scan_error(&error_regex, &line) {
-                    error_records.push(record);
+                if collect_scan_stderr(
+                    &line,
+                    &progress_regex,
+                    &error_regex,
+                    &mut items,
+                    &mut total,
+                    &mut error_records,
+                ) {
                     emit_scan_status(app_handle, items, total, &error_records);
                 }
             }
@@ -643,6 +719,7 @@ fn replace_cached_subtree(
         return false;
     };
 
+    let mut replaced_sizes = None;
     for child in children {
         let Some(name) = child.get("name").and_then(Value::as_str) else {
             continue;
@@ -653,46 +730,44 @@ fn replace_cached_subtree(
             node_path.join(name)
         };
 
-        if child_path == target_path {
+        let before = (tree_size(child), tree_allocated_size(child));
+        let replaced = if child_path == target_path {
             let preserved_name = child["name"].clone();
             *child = refreshed_tree.clone();
             child["name"] = preserved_name;
-            return true;
-        }
-        if target_path.starts_with(&child_path)
-            && replace_cached_subtree(child, &child_path, target_path, refreshed_tree)
-        {
-            return true;
+            true
+        } else {
+            target_path.starts_with(&child_path)
+                && replace_cached_subtree(child, &child_path, target_path, refreshed_tree)
+        };
+        if replaced {
+            replaced_sizes = Some((before, (tree_size(child), tree_allocated_size(child))));
+            break;
         }
     }
-    false
+    if let Some((before, after)) = replaced_sizes {
+        adjust_node_totals(node, before, after);
+        true
+    } else {
+        false
+    }
 }
 
-fn recalculate_tree_sizes(node: &mut Value) -> (u64, u64) {
-    let child_sizes = node
-        .get_mut("children")
-        .and_then(Value::as_array_mut)
-        .map(|children| {
-            children
-                .iter_mut()
-                .map(recalculate_tree_sizes)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    if child_sizes.is_empty() {
-        return (tree_size(node), tree_allocated_size(node));
+fn adjusted_tree_total(total: u64, before: u64, after: u64) -> u64 {
+    if after >= before {
+        total.saturating_add(after - before)
+    } else {
+        total.saturating_sub(before - after)
     }
+}
 
-    let (size, allocated_size) = child_sizes.into_iter().fold(
-        (0_u64, 0_u64),
-        |(size, allocated), (child_size, child_allocated)| {
-            (size + child_size, allocated + child_allocated)
-        },
-    );
-    node["size"] = Value::from(size);
-    node["allocatedSize"] = Value::from(allocated_size);
-    (size, allocated_size)
+fn adjust_node_totals(node: &mut Value, before: (u64, u64), after: (u64, u64)) {
+    node["size"] = Value::from(adjusted_tree_total(tree_size(node), before.0, after.0));
+    node["allocatedSize"] = Value::from(adjusted_tree_total(
+        tree_allocated_size(node),
+        before.1,
+        after.1,
+    ));
 }
 
 fn merge_changed_children(
@@ -710,10 +785,15 @@ fn merge_changed_children(
         .unwrap_or_default()
         .to_string();
     let total_root = root_name == "(total)";
+    let totals_before = (tree_size(root), tree_allocated_size(root));
     let children = root
         .get_mut("children")
         .and_then(Value::as_array_mut)
         .ok_or_else(|| "Cached scan tree has no children".to_string())?;
+    let children_before = (
+        children.iter().map(tree_size).sum::<u64>(),
+        children.iter().map(tree_allocated_size).sum::<u64>(),
+    );
 
     children.retain(|child| {
         child_path(scan_path, total_root, child)
@@ -752,8 +832,16 @@ fn merge_changed_children(
 
     let size = children.iter().map(tree_size).sum::<u64>();
     let allocated_size = children.iter().map(tree_allocated_size).sum::<u64>();
-    root["size"] = Value::from(size);
-    root["allocatedSize"] = Value::from(allocated_size);
+    root["size"] = Value::from(adjusted_tree_total(
+        totals_before.0,
+        children_before.0,
+        size,
+    ));
+    root["allocatedSize"] = Value::from(adjusted_tree_total(
+        totals_before.1,
+        children_before.1,
+        allocated_size,
+    ));
     Ok(())
 }
 
@@ -808,12 +896,40 @@ pub fn read_cached_result(
         .map_err(|err| err.to_string())
 }
 
+fn read_cached_error_report(
+    app_handle: &tauri::AppHandle,
+    scan_path: &str,
+    ratio: &str,
+) -> Result<Option<String>, String> {
+    let path = cache_error_report_path(app_handle, scan_path, ratio)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    fs::read_to_string(path)
+        .map(Some)
+        .map_err(|err| err.to_string())
+}
+
+pub fn read_cached_scan_error_report(
+    app_handle: tauri::AppHandle,
+    scan_path: String,
+    ratio: String,
+) -> Result<Option<String>, String> {
+    read_cached_error_report(&app_handle, &scan_path, &ratio)
+}
+
 pub fn has_cached_index(
     app_handle: &tauri::AppHandle,
     scan_path: &str,
     ratio: &str,
 ) -> Result<bool, String> {
-    Ok(cache_index_path(app_handle, scan_path, ratio)?.exists())
+    let path = cache_index_path(app_handle, scan_path, ratio)?;
+    let Ok(content) = fs::read_to_string(path) else {
+        return Ok(false);
+    };
+    Ok(serde_json::from_str::<CacheIndex>(&content)
+        .map(|index| index.matches_scan(scan_path, ratio))
+        .unwrap_or(false))
 }
 
 pub fn clear_cached_result(
@@ -825,6 +941,10 @@ pub fn clear_cached_result(
     if path.exists() {
         fs::remove_file(path).map_err(|err| err.to_string())?;
     }
+    let errors_path = cache_error_report_path(&app_handle, &scan_path, &ratio)?;
+    if errors_path.exists() {
+        fs::remove_file(errors_path).map_err(|err| err.to_string())?;
+    }
     Ok(())
 }
 
@@ -833,6 +953,7 @@ pub fn read_result(
     path: String,
     scan_path: String,
     ratio: String,
+    error_report: String,
 ) -> Result<String, String> {
     let prefix = format!("duckdisk-scan-{}-", std::process::id());
     let path = validate_result_file(&path, &prefix)?;
@@ -840,6 +961,7 @@ pub fn read_result(
     let content = fs::read_to_string(&path).map_err(|err| err.to_string())?;
     fs::remove_file(path).ok();
     write_cached_result(&app_handle, &scan_path, &ratio, &content)?;
+    write_cached_error_report(&app_handle, &scan_path, &ratio, &error_report)?;
     Ok(content)
 }
 
@@ -929,6 +1051,20 @@ fn write_cached_result(
     Ok(())
 }
 
+fn write_cached_error_report(
+    app_handle: &tauri::AppHandle,
+    scan_path: &str,
+    ratio: &str,
+    content: &str,
+) -> Result<(), String> {
+    serde_json::from_str::<ScanErrorReport>(content).map_err(|err| err.to_string())?;
+    let path = cache_error_report_path(app_handle, scan_path, ratio)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+    fs::write(path, content).map_err(|err| err.to_string())
+}
+
 fn cache_path(
     app_handle: &tauri::AppHandle,
     scan_path: &str,
@@ -952,6 +1088,14 @@ fn cache_index_path(
     ratio: &str,
 ) -> Result<PathBuf, String> {
     Ok(cache_path(app_handle, scan_path, ratio)?.with_extension("index.json"))
+}
+
+fn cache_error_report_path(
+    app_handle: &tauri::AppHandle,
+    scan_path: &str,
+    ratio: &str,
+) -> Result<PathBuf, String> {
+    Ok(cache_path(app_handle, scan_path, ratio)?.with_extension("errors.json"))
 }
 
 fn write_cache_index(
@@ -980,7 +1124,7 @@ fn write_cache_index(
         .filter_map(|path| metadata_entry(&path))
         .collect();
     let index = CacheIndex {
-        version: "duckdisk-cache-index-v3-dataless".to_string(),
+        version: CACHE_INDEX_VERSION.to_string(),
         scan_path: scan_path.to_string(),
         ratio: ratio.to_string(),
         children: entries,
@@ -1060,6 +1204,73 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn stderr_keeps_errors_after_carriage_return_progress() {
+        let progress_regex = Regex::new(r"\(scanned ([0-9]+), total ([0-9]+)\)").unwrap();
+        let error_regex = Regex::new(r#"^\[error\] (\S+) "(.+)": (.+)$"#).unwrap();
+        let mut items = 0;
+        let mut total = 0;
+        let mut records = Vec::new();
+
+        let changed = collect_scan_stderr(
+            "\r(scanned 12, total 50)\r[error] read_dir \"/protected\": Operation not permitted (os error 1)\n\r(scanned 25, total 50)\r[error] read_dir \"/restricted\": Permission denied (os error 13)\n",
+            &progress_regex,
+            &error_regex,
+            &mut items,
+            &mut total,
+            &mut records,
+        );
+
+        assert!(changed);
+        assert_eq!((items, total), (25, 50));
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].path, "/protected");
+        assert_eq!(records[0].kind, "operationNotPermitted");
+        assert_eq!(records[1].kind, "permissionDenied");
+    }
+
+    #[test]
+    fn incremental_error_report_replaces_only_changed_subtrees() {
+        let record = |path: &str| ScanErrorRecord {
+            operation: "read_dir".to_string(),
+            path: path.to_string(),
+            reason: "Operation not permitted".to_string(),
+            kind: "operationNotPermitted".to_string(),
+        };
+        let cached = build_error_report(vec![
+            record("/Users/old"),
+            record("/Library/unchanged"),
+            record("/Applications/removed"),
+        ]);
+        let refreshed = build_error_report(vec![record("/Users/new")]);
+        let removed = HashSet::from(["/Applications".to_string()]);
+
+        let merged = merge_scan_error_reports(cached, refreshed, &["/Users".to_string()], &removed);
+
+        let paths: Vec<_> = merged
+            .records
+            .iter()
+            .map(|record| record.path.as_str())
+            .collect();
+        assert_eq!(paths, ["/Library/unchanged", "/Users/new"]);
+        assert_eq!(merged.counts.operation_not_permitted, 2);
+    }
+
+    #[test]
+    fn old_scan_index_requires_a_full_rescan() {
+        let mut index = CacheIndex {
+            version: "duckdisk-cache-index-v4-skip-dataless-directories".to_string(),
+            scan_path: "/".to_string(),
+            ratio: "0".to_string(),
+            children: Vec::new(),
+        };
+
+        assert!(!index.matches_scan("/", "0"));
+        index.version = CACHE_INDEX_VERSION.to_string();
+        assert!(index.matches_scan("/", "0"));
+        assert!(!index.matches_scan("/Users", "0"));
+    }
+
+    #[test]
     fn replaces_nested_cached_subtree_and_recalculates_sizes() {
         let mut root = json!({
             "name": "(total)",
@@ -1096,7 +1307,6 @@ mod tests {
             &refreshed
         ));
         assert_eq!(root["children"][0]["children"][0]["name"], "qi");
-        assert_eq!(recalculate_tree_sizes(&mut root), (35, 48));
         assert_eq!(root["size"], 35);
         assert_eq!(root["allocatedSize"], 48);
     }
@@ -1119,5 +1329,40 @@ mod tests {
         assert_eq!(parsed["tree"]["size"], 5);
         assert_eq!(parsed["tree"]["allocatedSize"], 4096);
         assert_eq!(parsed["tree"]["isDirectory"], true);
+    }
+
+    #[test]
+    fn subtree_refresh_preserves_parent_deduplication() {
+        let mut root = json!({
+            "name": "(total)", "size": 16, "allocatedSize": 16,
+            "children": [
+                {"name": "/a", "size": 10, "allocatedSize": 10},
+                {"name": "/b", "size": 10, "allocatedSize": 10}
+            ]
+        });
+        let refreshed = json!({"name": "/a", "size": 15, "allocatedSize": 15});
+        assert!(replace_cached_subtree(
+            &mut root,
+            Path::new("/"),
+            Path::new("/a"),
+            &refreshed
+        ));
+        assert_eq!(root["allocatedSize"], 21);
+        assert_eq!(root["size"], 21);
+    }
+
+    #[test]
+    fn incremental_merge_preserves_parent_deduplication() {
+        let mut cached = json!({"tree": {
+            "name": "(total)", "size": 16, "allocatedSize": 16,
+            "children": [
+                {"name": "/a", "size": 10, "allocatedSize": 10},
+                {"name": "/b", "size": 10, "allocatedSize": 10}
+            ]
+        }});
+        let changed = Some(json!({"tree": {"name": "/a", "size": 15, "allocatedSize": 15}}));
+        merge_changed_children(&mut cached, "/", &HashSet::new(), &changed).unwrap();
+        assert_eq!(cached["tree"]["allocatedSize"], 21);
+        assert_eq!(cached["tree"]["size"], 21);
     }
 }

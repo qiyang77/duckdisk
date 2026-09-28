@@ -3,6 +3,7 @@ import removableDriver from "../assets/removable-drive.png";
 
 import { useNavigate } from "../router";
 import { formatBytes } from "../formatBytes";
+import { diskUsageTone } from "../diskUsageTone";
 import { ChevronRight } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 
@@ -12,7 +13,7 @@ const DiskItem = ({ disk }: any) => {
   const navigate = useNavigate();
   const usedSpace = Math.max(0, disk.totalSpace - disk.availableSpace);
   const perc = disk.totalSpace > 0 ? usedSpace / disk.totalSpace : 0;
-  const usageTone = perc >= 0.85 ? "critical" : perc >= 0.7 ? "warning" : "healthy";
+  const usageTone = diskUsageTone(perc);
 
   const icona = disk.isRemovable ? removableDriver : diskIcon;
   const scanDisk = async () => {
@@ -27,12 +28,22 @@ const DiskItem = ({ disk }: any) => {
       if (typeof selected !== "string") return;
       scanPath = selected;
     }
+    const isWholeVolume =
+      (scanPath.replace(/\/+$/, "") || "/") ===
+      (disk.sMountPoint.replace(/\/+$/, "") || "/");
     navigate("/disk", {
       state: {
         disk: scanPath,
-        used: usedSpace,
+        used: isWholeVolume ? usedSpace : 0,
         fullscan: true,
-        isDirectory: isMacAppStore,
+        isDirectory: !isWholeVolume,
+        volume: isWholeVolume
+          ? {
+              mountPoint: disk.sMountPoint,
+              totalSpace: disk.totalSpace,
+              availableSpace: disk.availableSpace,
+            }
+          : undefined,
       },
     });
   };

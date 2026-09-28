@@ -218,8 +218,45 @@ diff --git a/src/fs_tree_builder.rs b/src/fs_tree_builder.rs
 index 21b0902..99489ca 100644
 --- a/src/fs_tree_builder.rs
 +++ b/src/fs_tree_builder.rs
+@@ -12,0 +13,2 @@ use pipe_trait::Pipe;
++#[cfg(target_os = "macos")]
++use std::os::macos::fs::MetadataExt as MacMetadataExt;
+@@ -16,0 +19,17 @@ use std::{
++#[cfg(target_os = "macos")]
++fn is_dataless_directory(is_dir: bool, flags: u32) -> bool {
++    const UF_DATALESS: u32 = 0x4000_0000;
++    is_dir && flags & UF_DATALESS != 0
++}
++
++#[cfg(all(test, target_os = "macos"))]
++mod dataless_tests {
++    use super::is_dataless_directory;
++
++    #[test]
++    fn skips_only_dataless_directories() {
++        assert!(is_dataless_directory(true, 0x4000_0000));
++        assert!(!is_dataless_directory(false, 0x4000_0000));
++        assert!(!is_dataless_directory(true, 0));
++    }
++}
+@@ -108 +110 @@ where
+-                let (is_dir, size, same_device) = match symlink_metadata(path) {
++                let (is_dir, size, same_device, is_dataless) = match symlink_metadata(path) {
 @@ -116,0 +117 @@ where
 +                            is_directory: false,
+@@ -122,0 +125,6 @@ where
++                        // A cloud placeholder directory may block in getdirentries64
++                        // while macOS fetches it. Keep the node, but do not enter it.
++                        #[cfg(target_os = "macos")]
++                        let is_dataless = is_dataless_directory(is_dir, stats.st_flags());
++                        #[cfg(not(target_os = "macos"))]
++                        let is_dataless = false;
+@@ -132 +143 @@ where
+-                        (is_dir, size, same_device)
++                        (is_dir, size, same_device, is_dataless)
+@@ -136 +147 @@ where
+-                let children: Vec<_> = if is_dir && same_device {
++                let children: Vec<_> = if is_dir && same_device && !is_dataless {
 @@ -145,0 +147 @@ where
 +                                is_directory: true,
 @@ -167 +169,5 @@ where

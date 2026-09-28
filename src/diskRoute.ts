@@ -3,6 +3,11 @@ export type DiskRouteState = {
   used?: number;
   fullscan?: boolean;
   isDirectory?: boolean;
+  volume?: {
+    mountPoint: string;
+    totalSpace: number;
+    availableSpace: number;
+  };
   source?: "local" | "onedrive" | "googledrive" | "ssh";
   accountId?: string;
 };

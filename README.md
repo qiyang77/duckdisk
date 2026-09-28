@@ -18,13 +18,14 @@ The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
 Website: https://duckdisk.com/
 
-## What's New in v0.6.3
+## What's New in v0.6.4
 
-- Fixed opening deeply nested folders so clicking the folder name triggers the same on-demand scan as the expand control.
-- Added notarized native Intel builds and automatic updates for x86_64 Macs.
-- Added **Copy Full Path** to the local scan context menu.
-- Restored the previous window size, position, and maximized state at launch.
-- Clarified the Full Disk Access settings shortcut after access has already been granted.
+- Prevented local scans from blocking while macOS downloads cloud-placeholder directories.
+- Corrected apparent and allocated totals to preserve the scanner's hard-link deduplication during display, incremental updates, and folder refreshes.
+- Added disk total, macOS used, color-coded free space, and **Unscanned** statistics to whole-volume results. The question-mark button explains usage outside the scan without inventing per-category sizes.
+- Fixed missing permission-error reports and preserved scan issues in cached results, with a warning button for unreadable paths.
+- Added **Copy Current Path** to the result toolbar and removed the redundant Selected column.
+- Refreshes live disk usage after local deletions. Older scan caches are rebuilt once for accurate totals.
 
 ## Screenshots
 
@@ -59,6 +60,8 @@ For accurate full-disk scans, grant DuckDisk Full Disk Access:
 4. Restart DuckDisk and rescan.
 
 If macOS prompts for permissions during a scan, denied or previously blocked reads may count as scan errors. After granting permissions, run `Rescan` for cleaner results.
+
+The **Unscanned** value is the difference between current macOS-reported used space and the entire scan's deduplicated allocated total, not a measured folder or a list of removable files. It can include excluded system volumes, protected paths, filesystem accounting, and changes since the scan. Full Disk Access improves coverage but does not override every system permission.
 
 OneDrive scans use Microsoft account authorization and request `Files.ReadWrite` so selected files and folders can be moved to the OneDrive Recycle Bin. DuckDisk does not permanently delete cloud items. Refresh tokens are stored in macOS Keychain; cached scan metadata is stored in DuckDisk's application cache.
 

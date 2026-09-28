@@ -7,6 +7,8 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import * as d3 from "d3";
 import surfingDuck from "../assets/duck-disc-surf.png";
 import { formatBytes } from "../formatBytes";
+import { diskUsageTone } from "../diskUsageTone";
+import { adjustedScanTotal } from "../scanTotals";
 import {
   type DiskRouteState,
   readDiskRoute,
@@ -23,6 +25,8 @@ import {
   ArrowUp,
   ChevronDown,
   ChevronRight,
+  CircleHelp,
+  Copy,
   File as FileIcon,
   Folder as FolderIcon,
   FolderOpen,
@@ -44,6 +48,11 @@ type ScanStatus = {
   permissionDenied: number;
   interrupted: number;
   other: number;
+};
+
+type VolumeUsage = {
+  totalSpace: number;
+  availableSpace: number;
 };
 
 type ScanPhase =
@@ -434,9 +443,20 @@ const buildIndex = (root: DiskItem | null, deletedIds = new Set<string>()) => {
       }),
       { items: 1, files: 0, folders: 1, size: 0, allocatedSize: 0 }
     );
-    if (stats.size === 0 && (node.size || 0) > 0 && childStats.length === 0) {
-      stats.size = node.size;
-    }
+    stats.size = adjustedScanTotal(
+      node.size,
+      children.map((child, index) => ({
+        before: child.size || 0,
+        after: childStats[index].size,
+      }))
+    );
+    stats.allocatedSize = adjustedScanTotal(
+      node.allocatedSize ?? node.size,
+      children.map((child, index) => ({
+        before: child.allocatedSize ?? child.size ?? 0,
+        after: childStats[index].allocatedSize,
+      }))
+    );
     statsMap.set(node.id, stats);
     return stats;
   };
@@ -542,17 +562,30 @@ const replaceTreeNode = (
     return replacement;
   }
 
+  const children = (root.children || []).map((child) =>
+    child.id === nodeId
+      ? replacement
+      : nodeId.startsWith(`${child.id}/`)
+      ? replaceTreeNode(child, nodeId, replacement)
+      : child
+  );
   return {
     ...root,
-    children: sortChildrenBySize(
-      (root.children || []).map((child) =>
-        child.id === nodeId
-          ? replacement
-          : nodeId.startsWith(`${child.id}/`)
-          ? replaceTreeNode(child, nodeId, replacement)
-          : child
-      )
+    size: adjustedScanTotal(
+      root.size,
+      (root.children || []).map((child, index) => ({
+        before: child.size || 0,
+        after: children[index].size || 0,
+      }))
     ),
+    allocatedSize: adjustedScanTotal(
+      root.allocatedSize ?? root.size,
+      (root.children || []).map((child, index) => ({
+        before: child.allocatedSize ?? child.size ?? 0,
+        after: children[index].allocatedSize ?? children[index].size ?? 0,
+      }))
+    ),
+    children: sortChildrenBySize(children),
   };
 };
 
@@ -711,6 +744,10 @@ const Scanning = () => {
     source === "googledrive";
   const isSsh = source === "ssh";
   const isCloud = source !== "local";
+  const volumeMountPoint = !isCloud
+    ? routeState?.volume?.mountPoint ||
+      (routeState?.fullscan && !routeState.isDirectory ? disk : undefined)
+    : undefined;
   const showsAllocated = !isCloud || isSsh;
   const requiresKeychainApproval = isOneDrive || isGoogleDrive;
   const canDelete = true;
@@ -748,11 +785,23 @@ const Scanning = () => {
   const suppressClickUntil = useRef(0);
   const [view, setView] = useState<"loading" | "disk">("loading");
   const [status, setStatus] = useState<ScanStatus | null>(null);
+  const [volumeUsage, setVolumeUsage] = useState<VolumeUsage | null>(() =>
+    routeState?.volume
+      ? {
+          totalSpace: routeState.volume.totalSpace,
+          availableSpace: routeState.volume.availableSpace,
+        }
+      : null
+  );
+  const refreshVolumeUsageRef = useRef<(() => Promise<void>) | null>(null);
   const [scanPhase, setScanPhase] = useState<ScanPhase>("checkingCache");
   const [scanError, setScanError] = useState<string | null>(null);
   const [scanIssueReport, setScanIssueReport] =
     useState<ScanErrorReport>(emptyScanErrorReport);
   const [showScanIssues, setShowScanIssues] = useState(false);
+  const [showUnscannedDetails, setShowUnscannedDetails] = useState(false);
+  const unscannedHelpRef = useRef<HTMLButtonElement>(null);
+  const unscannedCloseRef = useRef<HTMLButtonElement>(null);
   const [rootNode, setRootNode] = useState<DiskItem | null>(null);
   const [currentNode, setCurrentNode] = useState<DiskItem | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -796,6 +845,75 @@ const Scanning = () => {
       rememberDiskRoute(routeState);
     }
   }, [routeState]);
+
+  useEffect(() => {
+    if (!showUnscannedDetails) return;
+    unscannedCloseRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowUnscannedDetails(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+      unscannedHelpRef.current?.focus();
+    };
+  }, [showUnscannedDetails]);
+
+  useEffect(() => {
+    if (!volumeMountPoint) {
+      setVolumeUsage(null);
+      refreshVolumeUsageRef.current = null;
+      return;
+    }
+
+    setVolumeUsage(
+      routeState?.volume
+        ? {
+            totalSpace: routeState.volume.totalSpace,
+            availableSpace: routeState.volume.availableSpace,
+          }
+        : null
+    );
+    let disposed = false;
+    const refreshVolumeUsage = async () => {
+      try {
+        const disks = JSON.parse(await invoke<string>("get_disks")) as Array<{
+          sMountPoint: string;
+          totalSpace: number;
+          availableSpace: number;
+        }>;
+        const volume = disks.find(
+          (candidate) => candidate.sMountPoint === volumeMountPoint
+        );
+        if (
+          !disposed &&
+          volume &&
+          Number.isFinite(volume.totalSpace) &&
+          Number.isFinite(volume.availableSpace)
+        ) {
+          setVolumeUsage({
+            totalSpace: volume.totalSpace,
+            availableSpace: volume.availableSpace,
+          });
+        }
+      } catch (error) {
+        console.warn("Could not update disk capacity", error);
+      }
+    };
+
+    refreshVolumeUsageRef.current = refreshVolumeUsage;
+    void refreshVolumeUsage();
+    const interval = window.setInterval(() => void refreshVolumeUsage(), 10000);
+    return () => {
+      disposed = true;
+      refreshVolumeUsageRef.current = null;
+      window.clearInterval(interval);
+    };
+  }, [
+    volumeMountPoint,
+    routeState?.volume?.totalSpace,
+    routeState?.volume?.availableSpace,
+  ]);
 
   useEffect(() => {
     const viewport = treeViewportRef.current;
@@ -930,8 +1048,9 @@ const Scanning = () => {
       try {
         setScanPhase("preparing");
         const payload = event.payload as { path: string; errorsPath: string };
+        let errorReport = JSON.stringify(emptyScanErrorReport);
         if (!isCloud && payload.errorsPath) {
-          const errorReport = await invoke<string>("read_scan_error_report", {
+          errorReport = await invoke<string>("read_scan_error_report", {
             path: payload.errorsPath,
           });
           setScanIssueReport(JSON.parse(errorReport));
@@ -946,6 +1065,7 @@ const Scanning = () => {
               path: payload.path,
               scanPath: disk,
               ratio,
+              errorReport,
             });
         worker.current?.postMessage(scanResult);
       } catch (error) {
@@ -1010,6 +1130,7 @@ const Scanning = () => {
       setCurrentNode(null);
       setScanIssueReport(emptyScanErrorReport);
       setShowScanIssues(false);
+      setShowUnscannedDetails(false);
       setDeleteList([]);
       setDeletedIds(new Set());
       setScanPhase(scanNonce === 0 ? "checkingCache" : "scanning");
@@ -1064,9 +1185,20 @@ const Scanning = () => {
               ratio,
             });
 
-            if (hasIndex) {
+            if (!disposed && hasIndex) {
+              let cachedIssues: ScanErrorReport = emptyScanErrorReport;
+              try {
+                const report = await invoke<string | null>(
+                  "read_cached_scan_error_report",
+                  { scanPath: disk, ratio }
+                );
+                if (report) cachedIssues = JSON.parse(report);
+              } catch (error) {
+                console.warn("Could not read cached scan issues", error);
+              }
+              if (disposed) return;
               setLoadedFromCache(true);
-              setScanIssueReport(emptyScanErrorReport);
+              setScanIssueReport(cachedIssues);
               setScanPhase("incremental");
               scanningStarted = true;
               invoke("start_scanning", { path: disk, ratio, useCache: true });
@@ -1261,6 +1393,13 @@ const Scanning = () => {
       ? statsMap.get(rootNode.id)?.allocatedSize || 0
       : statsMap.get(rootNode.id)?.size || 0
     : 0;
+  const volumeUsedSpace = volumeUsage
+    ? Math.max(0, volumeUsage.totalSpace - volumeUsage.availableSpace)
+    : 0;
+  const freeSpaceTone = diskUsageTone(
+    volumeUsage?.totalSpace ? volumeUsedSpace / volumeUsage.totalSpace : 0
+  );
+  const unscannedSpace = Math.max(0, volumeUsedSpace - rootUsageSize);
   const scannedTotal = status?.total || 0;
   const issueCount = totalScanIssues(scanIssueReport.counts);
   const canOpenScanIssues =
@@ -1353,9 +1492,9 @@ const Scanning = () => {
     invoke("show_in_folder", { path: node.id }).catch(console.error);
   };
 
-  const copyFullPath = async (node: DiskItem) => {
+  const copyFullPath = async (path: string) => {
     try {
-      await writeText(node.id);
+      await writeText(path);
       setRefreshNotice({ kind: "success", message: "Full path copied" });
       window.setTimeout(() => {
         setRefreshNotice((notice) =>
@@ -1465,6 +1604,13 @@ const Scanning = () => {
             targetPath: node.id,
             ratio,
           });
+      if (!isCloud) {
+        const report = await invoke<string | null>(
+          "read_cached_scan_error_report",
+          { scanPath: disk, ratio }
+        );
+        if (report) setScanIssueReport(JSON.parse(report));
+      }
       const parsed = JSON.parse(content);
       const refreshed = mapRefreshedTree(
         isCloud ? parsed : parsed.tree,
@@ -1662,6 +1808,7 @@ const Scanning = () => {
         invoke("clear_cached_scan_result", { scanPath: disk, ratio }).catch(
           console.error
         );
+        void refreshVolumeUsageRef.current?.();
       }
     }
 
@@ -1775,6 +1922,12 @@ const Scanning = () => {
                 : "Waiting for scan progress"}
             </div>
           )}
+          {volumeUsage && volumeUsage.totalSpace > 0 && (
+            <div className="scan-volume-meta">
+              Disk total {formatBytes(volumeUsage.totalSpace)} · macOS used{" "}
+              {formatBytes(volumeUsedSpace)}
+            </div>
+          )}
           <div className="scan-progress-track">
             <div
               className={`scan-progress-fill ${
@@ -1864,58 +2017,31 @@ const Scanning = () => {
               </span>
             )}
           </div>
-          <div
-            className={`results-metrics ${
-              showsAllocated ? "results-metrics-with-allocated" : ""
-            }`}
-          >
-            <div className="metric metric-selected">
-              <div className="metric-label">Selected</div>
-              <div className="metric-value truncate">
-                {currentNode ? getNodeName(currentNode) : disk}
-              </div>
-            </div>
-            <div className="metric">
-              <div className="metric-label">Size</div>
-              <div className="metric-value tabular-nums">
-                {formatBytes(currentSize)}
-              </div>
-            </div>
-            {showsAllocated && (
-              <div className="metric">
-                <div className="metric-label">Allocated</div>
-                <div className="metric-value tabular-nums">
-                  {formatBytes(currentStats.allocatedSize)}
-                </div>
-              </div>
-            )}
-            <div className="metric">
-              <div className="metric-label">Items</div>
-              <div className="metric-value tabular-nums">
-                {currentStats.items.toLocaleString()}
-              </div>
-            </div>
-            <div className="metric">
-              <div className="metric-label">Files</div>
-              <div className="metric-value tabular-nums">
-                {currentStats.files.toLocaleString()}
-              </div>
-            </div>
-            <div className="metric">
-              <div className="metric-label">Folders</div>
-              <div className="metric-value tabular-nums">
-                {currentStats.folders.toLocaleString()}
-              </div>
-            </div>
-          </div>
         </div>
         <div className="results-actions">
           {!isCloud && (
             <button
               type="button"
+              onClick={() => void copyFullPath(currentNode?.id || disk)}
+              className="button button-secondary"
+            >
+              <Copy size={14} />
+              Copy Current Path
+            </button>
+          )}
+          {!isCloud && (
+            <button
+              type="button"
               onClick={() => setShowScanIssues(true)}
               disabled={!canOpenScanIssues}
-              className="button button-secondary"
+              className={`button ${
+                issueCount ? "button-warning" : "button-secondary"
+              }`}
+              title={
+                issueCount
+                  ? `${issueCount.toLocaleString()} paths could not be scanned. Open for details.`
+                  : undefined
+              }
             >
               <AlertTriangle size={14} />
               Scan Issues
@@ -1941,6 +2067,87 @@ const Scanning = () => {
               <FolderOpen size={14} />
               Reveal
             </button>
+          )}
+        </div>
+        <div
+          className={`results-metrics ${
+            showsAllocated ? "results-metrics-with-allocated" : ""
+          } ${volumeUsage?.totalSpace ? "results-metrics-with-volume" : ""}`}
+        >
+          <div className="metric">
+            <div className="metric-label">Size</div>
+            <div className="metric-value tabular-nums">
+              {formatBytes(currentSize)}
+            </div>
+          </div>
+          {showsAllocated && (
+            <div className="metric">
+              <div className="metric-label">Allocated</div>
+              <div className="metric-value tabular-nums">
+                {formatBytes(currentStats.allocatedSize)}
+              </div>
+            </div>
+          )}
+          <div className="metric">
+            <div className="metric-label">Items</div>
+            <div className="metric-value tabular-nums">
+              {currentStats.items.toLocaleString()}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">Files</div>
+            <div className="metric-value tabular-nums">
+              {currentStats.files.toLocaleString()}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">Folders</div>
+            <div className="metric-value tabular-nums">
+              {currentStats.folders.toLocaleString()}
+            </div>
+          </div>
+          {volumeUsage && volumeUsage.totalSpace > 0 && (
+            <>
+              <div className="metric metric-volume-start">
+                <div className="metric-label">Disk total</div>
+                <div className="metric-value tabular-nums">
+                  {formatBytes(volumeUsage.totalSpace)}
+                </div>
+              </div>
+              <div className="metric">
+                <div className="metric-label">macOS used</div>
+                <div className="metric-value tabular-nums">
+                  {formatBytes(volumeUsedSpace)}
+                </div>
+              </div>
+              <div className="metric">
+                <div className="metric-label">Free</div>
+                <div
+                  className="metric-value metric-free-value tabular-nums"
+                  data-tone={freeSpaceTone}
+                >
+                  {formatBytes(volumeUsage.availableSpace)}
+                </div>
+              </div>
+              <div className="metric">
+                <div className="metric-label metric-label-with-help">
+                  Unscanned
+                  <button
+                    ref={unscannedHelpRef}
+                    type="button"
+                    className="metric-help-button"
+                    aria-label="Explain unscanned disk usage"
+                    title="What is outside this scan?"
+                    onClick={() => setShowUnscannedDetails(true)}
+                  >
+                    <CircleHelp size={12} />
+                  </button>
+                </div>
+                <div className="metric-value tabular-nums">
+                  {formatBytes(unscannedSpace)}
+                </div>
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -2529,7 +2736,7 @@ const Scanning = () => {
             <>
               <button
                 role="menuitem"
-                onClick={() => void copyFullPath(contextMenu.node)}
+                onClick={() => void copyFullPath(contextMenu.node.id)}
                 className="context-menu-item"
               >
                 Copy Full Path
@@ -2629,6 +2836,95 @@ const Scanning = () => {
                   Delete Permanently
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {showUnscannedDetails && volumeUsage && (
+        <div
+          className="modal-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setShowUnscannedDetails(false);
+          }}
+        >
+          <div
+            className="app-dialog unscanned-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="unscanned-dialog-title"
+          >
+            <div className="dialog-header">
+              <div>
+                <div id="unscanned-dialog-title" className="text-sm font-semibold text-white">
+                  Disk usage outside this scan
+                </div>
+                <div className="mt-1 text-xs text-slate-400">
+                  {formatBytes(volumeUsedSpace)} macOS used − {formatBytes(rootUsageSize)} scanned allocated
+                  {" "}= {formatBytes(unscannedSpace)}
+                </div>
+              </div>
+              <button
+                ref={unscannedCloseRef}
+                type="button"
+                className="icon-button"
+                aria-label="Close unscanned details"
+                onClick={() => setShowUnscannedDetails(false)}
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <div className="unscanned-dialog-body">
+              <p>
+                This is the disk-wide difference, not the size of a measured folder.
+                It stays disk-wide when you open a subfolder. It can include:
+              </p>
+              {disk === "/" && (
+                <section>
+                  <h3>System volumes and excluded locations</h3>
+                  <p>
+                    The root scan excludes /System and /Volumes to avoid traversing
+                    duplicate mounts and other volumes. APFS System, Preboot,
+                    Recovery and VM volumes, plus Data-only system paths, are not
+                    itemized in this file tree.
+                  </p>
+                </section>
+              )}
+              <section>
+                <h3>Unreadable paths</h3>
+                <p>
+                  {issueCount
+                    ? `${issueCount.toLocaleString()} paths could not be read in this scan. macOS privacy protection, system-only permissions or read interruptions can prevent access. Their byte sizes are unknown.`
+                    : "No unreadable paths are recorded in the available report. This does not prove that every byte of disk usage can be itemized."}
+                </p>
+                {canOpenScanIssues && (
+                  <button
+                    type="button"
+                    className="button button-secondary mt-2"
+                    onClick={() => {
+                      setShowUnscannedDetails(false);
+                      setShowScanIssues(true);
+                    }}
+                  >
+                    <AlertTriangle size={13} />
+                    View Scan Issues
+                  </button>
+                )}
+              </section>
+              <section>
+                <h3>Filesystem accounting and scan age</h3>
+                <p>
+                  Filesystem metadata, snapshots, shared APFS space and cloud
+                  placeholders may not be represented as ordinary scanned files.
+                  macOS usage is live; cached scans or changes after a scan can
+                  also affect this difference.
+                </p>
+              </section>
+              <p className="unscanned-disclaimer">
+                These categories can overlap; no exact per-category sizes are
+                inferred from the difference. Deleted or refreshed shared files
+                may require a full rescan for exact deduplicated totals. This
+                number is not a list of files you can delete.
+              </p>
             </div>
           </div>
         </div>

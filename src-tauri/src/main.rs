@@ -104,6 +104,7 @@ fn main() {
         read_scan_result,
         read_scan_error_report,
         read_cached_scan_result,
+        read_cached_scan_error_report,
         has_cached_scan_index,
         clear_cached_scan_result,
         delete_local_item,
@@ -149,6 +150,7 @@ fn main() {
         read_scan_result,
         read_scan_error_report,
         read_cached_scan_result,
+        read_cached_scan_error_report,
         has_cached_scan_index,
         clear_cached_scan_result,
         delete_local_item,
@@ -424,9 +426,10 @@ async fn read_scan_result(
     path: String,
     scan_path: String,
     ratio: String,
+    error_report: String,
 ) -> Result<String, String> {
     run_blocking("Scan result read task failed", move || {
-        scan::read_result(app_handle, path, scan_path, ratio)
+        scan::read_result(app_handle, path, scan_path, ratio, error_report)
     })
     .await
 }
@@ -444,6 +447,18 @@ async fn read_cached_scan_result(
 ) -> Result<Option<String>, String> {
     run_blocking("Cached scan read task failed", move || {
         scan::read_cached_result(app_handle, scan_path, ratio)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn read_cached_scan_error_report(
+    app_handle: tauri::AppHandle,
+    scan_path: String,
+    ratio: String,
+) -> Result<Option<String>, String> {
+    run_blocking("Cached scan error report read task failed", move || {
+        scan::read_cached_scan_error_report(app_handle, scan_path, ratio)
     })
     .await
 }

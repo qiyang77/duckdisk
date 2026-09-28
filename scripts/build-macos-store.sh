@@ -64,7 +64,8 @@ test -d "$source_app"
 for binary in \
   "$source_app/Contents/MacOS/DuckDisk" \
   "$source_app/Contents/MacOS/pdu"; do
-  lipo "$binary" -verify_arch arm64 x86_64
+  lipo -verify_arch arm64 "$binary"
+  lipo -verify_arch x86_64 "$binary"
 done
 
 # App Review rejects binaries that link the private IOHID temperature APIs used
@@ -89,7 +90,8 @@ xattr -cr "$prepared_app"
 for binary in \
   "$prepared_app/Contents/MacOS/DuckDisk" \
   "$prepared_app/Contents/MacOS/pdu"; do
-  lipo "$binary" -verify_arch arm64 x86_64
+  lipo -verify_arch arm64 "$binary"
+  lipo -verify_arch x86_64 "$binary"
 done
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" \
   "$prepared_app/Contents/Info.plist"
@@ -125,10 +127,12 @@ if [[ "${MAS_SKIP_SIGNING:-0}" == "1" ]]; then
   verify_dir="$store_work_dir/verify-unsigned"
   mkdir -p "$verify_dir"
   ditto -x -k "$unsigned_zip" "$verify_dir"
-  lipo "$verify_dir/DuckDisk.app/Contents/MacOS/DuckDisk" \
-    -verify_arch arm64 x86_64
-  lipo "$verify_dir/DuckDisk.app/Contents/MacOS/pdu" \
-    -verify_arch arm64 x86_64
+  for binary in \
+    "$verify_dir/DuckDisk.app/Contents/MacOS/DuckDisk" \
+    "$verify_dir/DuckDisk.app/Contents/MacOS/pdu"; do
+    lipo -verify_arch arm64 "$binary"
+    lipo -verify_arch x86_64 "$binary"
+  done
   codesign --verify --deep --strict --verbose=2 "$verify_dir/DuckDisk.app"
   echo "Ad-hoc signed MAS app archive: $unsigned_zip"
   exit 0
