@@ -11,13 +11,13 @@ DuckDisk uses one repository with two isolated release flavors.
 Build an ad-hoc signed sandboxed app without changing the direct-distribution manifest:
 
 ```bash
-MAS_SKIP_SIGNING=1 MAS_BUILD_NUMBER=516 npm run release:macos-store
+MAS_SKIP_SIGNING=1 MAS_BUILD_NUMBER=517 npm run release:macos-store
 ```
 
 The build is written as a ZIP archive to:
 
 ```text
-src-tauri/target/mas-store/DuckDisk-0.6.4-MAS-unsigned.zip
+src-tauri/target/mas-store/DuckDisk-0.6.5-MAS-unsigned.zip
 ```
 
 The script builds in an isolated temporary source tree so it can disable the direct-distribution feature set and generate the sandboxed frontend without mutating the normal checkout.
@@ -45,7 +45,7 @@ npm run release:macos-store
 The resulting installer package is written to:
 
 ```text
-src-tauri/target/mas-store/DuckDisk-0.6.4-MAS.pkg
+src-tauri/target/mas-store/DuckDisk-0.6.5-MAS.pkg
 ```
 
 The `Mac App Store` GitHub Actions workflow imports the two distribution

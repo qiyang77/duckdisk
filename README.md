@@ -18,7 +18,9 @@ The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
 Website: https://duckdisk.com/
 
-## What's New in v0.6.4
+## What's New in v0.6.5
+
+Mac App Store 0.6.5 includes these fixes. The direct download remains v0.6.4 with the same fixes in its September 30 replacement build.
 
 - Local scans now disable automatic cloud materialization before scanning and mark skipped cloud-only content explicitly instead of presenting it as empty.
 - Cloud-only files are summarized as one scan issue rather than one warning per file. File and folder totals now include descendants omitted from the displayed tree depth.
