@@ -8,6 +8,7 @@ interface DiskItem {
   value: number;
   size: number;
   allocatedSize?: number;
+  scanSkippedReason?: string;
   isDirectory: boolean;
   children: Array<DiskItem>;
 }

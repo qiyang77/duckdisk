@@ -271,7 +271,7 @@ pub async fn connect_account(app_handle: &tauri::AppHandle) -> Result<OneDriveAc
         .secret()
         .to_string();
 
-    let http = Client::new();
+    let http = crate::cloud_io::http_client()?;
     let drive: GraphDrive = graph_get(
         &http,
         token.access_token().secret(),
@@ -336,7 +336,12 @@ pub fn start_scan(
     }
 
     tauri::async_runtime::spawn(async move {
-        match scan_account(&app_handle, &account_id, force_full).await {
+        match crate::cloud_io::cancellable(
+            scan_account(&app_handle, &account_id, force_full),
+            || ensure_scan_active(&account_id),
+        )
+        .await
+        {
             Ok(path) => {
                 app_handle
                     .emit(
@@ -411,7 +416,11 @@ pub async fn refresh_item(
         scans.insert(account_id.to_string(), ActiveScan::default());
     }
 
-    let result = refresh_item_inner(app_handle, account_id, item_id).await;
+    let result =
+        crate::cloud_io::cancellable(refresh_item_inner(app_handle, account_id, item_id), || {
+            ensure_scan_active(account_id)
+        })
+        .await;
     ACTIVE_SCANS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -438,7 +447,7 @@ async fn refresh_item_inner(
     }
 
     let access_token = refresh_access_token(account_id).await?;
-    let http = Client::new();
+    let http = crate::cloud_io::http_client()?;
     let selected: GraphItem = graph_get(
         &http,
         &access_token,
@@ -507,7 +516,7 @@ pub async fn delete_items(
     }
 
     let mut access_token = refresh_access_token(account_id).await?;
-    let http = Client::new();
+    let http = crate::cloud_io::http_client()?;
     let total = item_ids.len() as u64;
     let mut deleted_ids = Vec::new();
     let mut failures = Vec::new();
@@ -585,7 +594,7 @@ async fn scan_account(
     ensure_scan_active(account_id)?;
     let mut access_token = refresh_access_token(account_id).await?;
     let mut access_token_refreshed_at = Instant::now();
-    let http = Client::new();
+    let http = crate::cloud_io::http_client()?;
     let drive: GraphDrive = graph_get(
         &http,
         &access_token,
@@ -1134,7 +1143,7 @@ fn oauth_client(client_id: &str, redirect: Option<&str>) -> Result<ConfiguredBas
 }
 
 fn oauth_http_client() -> Result<Client, String> {
-    Client::builder()
+    crate::cloud_io::client_builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|err| format!("Could not configure OAuth client: {err}"))

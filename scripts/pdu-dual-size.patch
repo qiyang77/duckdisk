@@ -1,3 +1,67 @@
+diff --git a/cli/main.rs b/cli/main.rs
+index 334ce48..b6f7379 100644
+--- a/cli/main.rs
++++ b/cli/main.rs
+@@ -3,0 +4,5 @@ fn main() -> ExitCode {
++    #[cfg(target_os = "macos")]
++    if let Err(error) = disable_cloud_materialization() {
++        eprintln!("Cannot safely scan without disabling automatic cloud downloads: {error}");
++        return ExitCode::FAILURE;
++    }
+@@ -5,0 +11,53 @@ fn main() -> ExitCode {
++
++#[cfg(target_os = "macos")]
++fn disable_cloud_materialization() -> std::io::Result<()> {
++    // Public Darwin constants from sys/resource.h. Set this before Rayon workers
++    // or path metadata lookups, including lookups through dataless ancestors.
++    const IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES: i32 = 3;
++    const IOPOL_SCOPE_PROCESS: i32 = 0;
++    const IOPOL_MATERIALIZE_DATALESS_FILES_OFF: i32 = 1;
++    unsafe extern "C" {
++        fn setiopolicy_np(iotype: i32, scope: i32, policy: i32) -> i32;
++        fn getiopolicy_np(iotype: i32, scope: i32) -> i32;
++    }
++    let result = unsafe {
++        setiopolicy_np(
++            IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES,
++            IOPOL_SCOPE_PROCESS,
++            IOPOL_MATERIALIZE_DATALESS_FILES_OFF,
++        )
++    };
++    if result != 0 {
++        return Err(std::io::Error::last_os_error());
++    }
++    let active = unsafe {
++        getiopolicy_np(
++            IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES,
++            IOPOL_SCOPE_PROCESS,
++        )
++    };
++    if active != IOPOL_MATERIALIZE_DATALESS_FILES_OFF {
++        return Err(std::io::Error::other(
++            "macOS did not apply the no-download policy",
++        ));
++    }
++    Ok(())
++}
++
++#[cfg(all(test, target_os = "macos"))]
++mod tests {
++    #[test]
++    fn applies_no_download_policy_before_scanning() {
++        super::disable_cloud_materialization().unwrap();
++        std::thread::spawn(|| {
++            unsafe extern "C" {
++                fn getiopolicy_np(iotype: i32, scope: i32) -> i32;
++            }
++            assert_eq!(unsafe { getiopolicy_np(3, 0) }, 1);
++            // New workers use the process policy rather than overriding it.
++            assert_eq!(unsafe { getiopolicy_np(3, 1) }, 0);
++        })
++        .join()
++        .unwrap();
++    }
++}
 diff --git a/src/app.rs b/src/app.rs
 index 42d6e6e..6a5cce4 100644
 --- a/src/app.rs
@@ -32,17 +96,131 @@ index a51225d..6305cd9 100644
 +    /// Measure apparent and allocated byte sizes in one pass.
 +    #[cfg(unix)]
 +    DualSize,
-diff --git a/src/get_size.rs b/src/get_size.rs
-index 235fef8..02e6151 100644
---- a/src/get_size.rs
-+++ b/src/get_size.rs
-@@ -5 +5 @@ use std::fs::Metadata;
--use super::size::Blocks;
-+use super::size::{Blocks, DualBytes};
-@@ -7,0 +8,2 @@ use std::os::unix::prelude::MetadataExt;
+diff --git a/src/data_tree.rs b/src/data_tree.rs
+index 6c68ff6..542c28b 100644
+--- a/src/data_tree.rs
++++ b/src/data_tree.rs
+@@ -27,0 +28 @@ pub struct DataTree<Name, Size: size::Size> {
++    is_directory: bool,
+diff --git a/src/data_tree/constructors.rs b/src/data_tree/constructors.rs
+index 3b95367..491408a 100644
+--- a/src/data_tree/constructors.rs
++++ b/src/data_tree/constructors.rs
+@@ -11,0 +12 @@ impl<Name, Size: size::Size> DataTree<Name, Size> {
++            is_directory: true,
+@@ -21,0 +23 @@ impl<Name, Size: size::Size> DataTree<Name, Size> {
++            is_directory: false,
+diff --git a/src/data_tree/reflection.rs b/src/data_tree/reflection.rs
+index 8288b4b..dcd8d09 100644
+--- a/src/data_tree/reflection.rs
++++ b/src/data_tree/reflection.rs
+@@ -37,0 +38,3 @@ pub struct Reflection<Name, Size: size::Size> {
++    /// Whether this filesystem node is a directory, including empty and truncated directories.
++    #[cfg_attr(feature = "json", serde(rename = "isDirectory", default))]
++    pub is_directory: bool,
+diff --git a/src/data_tree/reflection/convert.rs b/src/data_tree/reflection/convert.rs
+index ff36080..a6b19e7 100644
+--- a/src/data_tree/reflection/convert.rs
++++ b/src/data_tree/reflection/convert.rs
+@@ -8,0 +9 @@ impl<Name, Size: size::Size> From<DataTree<Name, Size>> for Reflection<Name, Siz
++            is_directory,
+@@ -14,0 +16 @@ impl<Name, Size: size::Size> From<DataTree<Name, Size>> for Reflection<Name, Siz
++            is_directory,
+diff --git a/src/data_tree/reflection/par_methods.rs b/src/data_tree/reflection/par_methods.rs
+index 786c1da..76f5f37 100644
+--- a/src/data_tree/reflection/par_methods.rs
++++ b/src/data_tree/reflection/par_methods.rs
+@@ -15,0 +16 @@ where
++            is_directory,
+@@ -44,0 +46 @@ where
++            is_directory,
+@@ -62,0 +65 @@ where
++            is_directory,
+@@ -72,0 +76 @@ where
++            is_directory,
+diff --git a/src/data_tree/retain/test.rs b/src/data_tree/retain/test.rs
+index 2c8e7fe..98d954c 100644
+--- a/src/data_tree/retain/test.rs
++++ b/src/data_tree/retain/test.rs
+@@ -105 +105 @@ fn typical_case() {
+-            file("directory of multiple small files", 4069 + 11 * 4321),
++            culled_dir("directory of multiple small files", 11 * 4321, vec![]),
+@@ -169 +169 @@ fn edge_cases() {
+-            file("reduce all", 4069 + 123 + 456 + 789),
++            culled_dir("reduce all", 123 + 456 + 789, vec![]),
+diff --git a/src/fs_tree_builder.rs b/src/fs_tree_builder.rs
+index 21b0902..4d6ca6d 100644
+--- a/src/fs_tree_builder.rs
++++ b/src/fs_tree_builder.rs
+@@ -7 +7 @@ use super::{
+-    reporter::{ErrorReport, Event, Reporter, error_report::Operation::*},
++    reporter::{error_report::Operation::*, ErrorReport, Event, Reporter},
+@@ -12,0 +13,2 @@ use pipe_trait::Pipe;
 +#[cfg(target_os = "macos")]
 +use std::os::macos::fs::MetadataExt as MacMetadataExt;
-@@ -38,0 +41,31 @@ impl GetSize for GetBlockSize {
+@@ -16,0 +19,17 @@ use std::{
++#[cfg(target_os = "macos")]
++fn is_dataless_directory(is_dir: bool, flags: u32) -> bool {
++    const SF_DATALESS: u32 = 0x4000_0000;
++    is_dir && flags & SF_DATALESS != 0
++}
++
++#[cfg(all(test, target_os = "macos"))]
++mod dataless_tests {
++    use super::is_dataless_directory;
++
++    #[test]
++    fn skips_only_dataless_directories() {
++        assert!(is_dataless_directory(true, 0x4000_0000));
++        assert!(!is_dataless_directory(false, 0x4000_0000));
++        assert!(!is_dataless_directory(true, 0));
++    }
++}
+@@ -108 +127 @@ where
+-                let (is_dir, size, same_device) = match symlink_metadata(path) {
++                let (is_dir, size, same_device, is_dataless) = match symlink_metadata(path) {
+@@ -116,0 +136 @@ where
++                            is_directory: false,
+@@ -122,0 +143,14 @@ where
++                        // A cloud placeholder directory may block in getdirentries64
++                        // while macOS fetches it. Keep the node, but do not enter it.
++                        #[cfg(target_os = "macos")]
++                        let is_dataless = is_dataless_directory(is_dir, stats.st_flags());
++                        #[cfg(target_os = "macos")]
++                        if stats.st_flags() & 0x4000_0000 != 0 {
++                            reporter.report(Event::EncounterError(ErrorReport {
++                                operation: SymlinkMetadata,
++                                path,
++                                error: std::io::Error::other("DuckDisk cloud placeholder skipped: automatic download disabled"),
++                            }));
++                        }
++                        #[cfg(not(target_os = "macos"))]
++                        let is_dataless = false;
+@@ -132 +166 @@ where
+-                        (is_dir, size, same_device)
++                        (is_dir, size, same_device, is_dataless)
+@@ -136 +170 @@ where
+-                let children: Vec<_> = if is_dir && same_device {
++                let children: Vec<_> = if is_dir && same_device && !is_dataless {
+@@ -145,0 +180 @@ where
++                                is_directory: true,
+@@ -167 +202,5 @@ where
+-                Info { size, children }
++                Info {
++                    size,
++                    is_directory: is_dir,
++                    children,
++                }
+diff --git a/src/get_size.rs b/src/get_size.rs
+index 235fef8..746d45d 100644
+--- a/src/get_size.rs
++++ b/src/get_size.rs
+@@ -5 +5,3 @@ use std::fs::Metadata;
+-use super::size::Blocks;
++use super::size::{Blocks, DualBytes};
++#[cfg(target_os = "macos")]
++use std::os::macos::fs::MetadataExt as MacMetadataExt;
+@@ -38,0 +41,50 @@ impl GetSize for GetBlockSize {
 +/// Returns both apparent and allocated byte counts from one metadata lookup.
 +#[cfg(unix)]
 +#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -55,11 +233,9 @@ index 235fef8..02e6151 100644
 +    fn get_size(&self, metadata: &Metadata) -> Self::Size {
 +        let allocated = metadata.blocks() * 512;
 +        #[cfg(target_os = "macos")]
-+        const UF_DATALESS: u32 = 0x4000_0000;
++        const SF_DATALESS: u32 = 0x4000_0000;
 +        #[cfg(target_os = "macos")]
-+        let apparent = if metadata.st_flags() & UF_DATALESS != 0
-+            || (allocated == 0 && metadata.len() > 0)
-+        {
++        let apparent = if metadata.st_flags() & SF_DATALESS != 0 {
 +            0
 +        } else {
 +            metadata.len()
@@ -71,6 +247,27 @@ index 235fef8..02e6151 100644
 +            allocated,
 +            apparent,
 +        }
++    }
++}
++
++#[cfg(all(test, target_os = "macos"))]
++mod duckdisk_size_tests {
++    use super::{GetDualSize, GetSize};
++    #[test]
++    fn keeps_logical_size_of_ordinary_zero_block_sparse_file() {
++        let path =
++            std::env::temp_dir().join(format!("duckdisk-sparse-test-{}", std::process::id()));
++        let file = std::fs::OpenOptions::new()
++            .write(true)
++            .create_new(true)
++            .open(&path)
++            .unwrap();
++        file.set_len(64 * 1024 * 1024).unwrap();
++        let metadata = file.metadata().unwrap();
++        let size = GetDualSize.get_size(&metadata);
++        std::fs::remove_file(path).unwrap();
++        assert_eq!(size.apparent, 64 * 1024 * 1024);
++        assert_eq!(size.allocated, 0);
 +    }
 +}
 +
@@ -172,100 +369,6 @@ index 34224b8..89f9a73 100644
 +        format.format(self.allocated)
 +    }
 +}
-diff --git a/src/data_tree.rs b/src/data_tree.rs
-index 6c68ff6..542c28b 100644
---- a/src/data_tree.rs
-+++ b/src/data_tree.rs
-@@ -27,0 +28 @@ pub struct DataTree<Name, Size: size::Size> {
-+    is_directory: bool,
-diff --git a/src/data_tree/constructors.rs b/src/data_tree/constructors.rs
-index 3b95367..491408a 100644
---- a/src/data_tree/constructors.rs
-+++ b/src/data_tree/constructors.rs
-@@ -11,0 +12 @@ impl<Name, Size: size::Size> DataTree<Name, Size> {
-+            is_directory: true,
-@@ -21,0 +23 @@ impl<Name, Size: size::Size> DataTree<Name, Size> {
-+            is_directory: false,
-diff --git a/src/data_tree/reflection.rs b/src/data_tree/reflection.rs
-index 8288b4b..dcd8d09 100644
---- a/src/data_tree/reflection.rs
-+++ b/src/data_tree/reflection.rs
-@@ -37,0 +38,3 @@ pub struct Reflection<Name, Size: size::Size> {
-+    /// Whether this filesystem node is a directory, including empty and truncated directories.
-+    #[cfg_attr(feature = "json", serde(rename = "isDirectory", default))]
-+    pub is_directory: bool,
-diff --git a/src/data_tree/reflection/convert.rs b/src/data_tree/reflection/convert.rs
-index ff36080..a6b19e7 100644
---- a/src/data_tree/reflection/convert.rs
-+++ b/src/data_tree/reflection/convert.rs
-@@ -8,0 +9 @@ impl<Name, Size: size::Size> From<DataTree<Name, Size>> for Reflection<Name, Siz
-+            is_directory,
-@@ -14,0 +16 @@ impl<Name, Size: size::Size> From<DataTree<Name, Size>> for Reflection<Name, Siz
-+            is_directory,
-diff --git a/src/data_tree/reflection/par_methods.rs b/src/data_tree/reflection/par_methods.rs
-index 786c1da..76f5f37 100644
---- a/src/data_tree/reflection/par_methods.rs
-+++ b/src/data_tree/reflection/par_methods.rs
-@@ -15,0 +16 @@ where
-+            is_directory,
-@@ -44,0 +46 @@ where
-+            is_directory,
-@@ -62,0 +65 @@ where
-+            is_directory,
-@@ -72,0 +76 @@ where
-+            is_directory,
-diff --git a/src/fs_tree_builder.rs b/src/fs_tree_builder.rs
-index 21b0902..99489ca 100644
---- a/src/fs_tree_builder.rs
-+++ b/src/fs_tree_builder.rs
-@@ -12,0 +13,2 @@ use pipe_trait::Pipe;
-+#[cfg(target_os = "macos")]
-+use std::os::macos::fs::MetadataExt as MacMetadataExt;
-@@ -16,0 +19,17 @@ use std::{
-+#[cfg(target_os = "macos")]
-+fn is_dataless_directory(is_dir: bool, flags: u32) -> bool {
-+    const UF_DATALESS: u32 = 0x4000_0000;
-+    is_dir && flags & UF_DATALESS != 0
-+}
-+
-+#[cfg(all(test, target_os = "macos"))]
-+mod dataless_tests {
-+    use super::is_dataless_directory;
-+
-+    #[test]
-+    fn skips_only_dataless_directories() {
-+        assert!(is_dataless_directory(true, 0x4000_0000));
-+        assert!(!is_dataless_directory(false, 0x4000_0000));
-+        assert!(!is_dataless_directory(true, 0));
-+    }
-+}
-@@ -108 +110 @@ where
--                let (is_dir, size, same_device) = match symlink_metadata(path) {
-+                let (is_dir, size, same_device, is_dataless) = match symlink_metadata(path) {
-@@ -116,0 +117 @@ where
-+                            is_directory: false,
-@@ -122,0 +125,6 @@ where
-+                        // A cloud placeholder directory may block in getdirentries64
-+                        // while macOS fetches it. Keep the node, but do not enter it.
-+                        #[cfg(target_os = "macos")]
-+                        let is_dataless = is_dataless_directory(is_dir, stats.st_flags());
-+                        #[cfg(not(target_os = "macos"))]
-+                        let is_dataless = false;
-@@ -132 +143 @@ where
--                        (is_dir, size, same_device)
-+                        (is_dir, size, same_device, is_dataless)
-@@ -136 +147 @@ where
--                let children: Vec<_> = if is_dir && same_device {
-+                let children: Vec<_> = if is_dir && same_device && !is_dataless {
-@@ -145,0 +147 @@ where
-+                                is_directory: true,
-@@ -167 +169,5 @@ where
--                Info { size, children }
-+                Info {
-+                    size,
-+                    is_directory: is_dir,
-+                    children,
-+                }
 diff --git a/src/tree_builder.rs b/src/tree_builder.rs
 index 5f82572..327bf03 100644
 --- a/src/tree_builder.rs

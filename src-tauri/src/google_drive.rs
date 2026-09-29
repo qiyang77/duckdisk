@@ -257,7 +257,7 @@ pub async fn connect_account(app_handle: &tauri::AppHandle) -> Result<GoogleDriv
         .secret()
         .to_string();
 
-    let http = Client::new();
+    let http = crate::cloud_io::http_client()?;
     let about = fetch_about(&http, token.access_token().secret()).await?;
     let account = account_from_about(&about);
     store_credential(&account.id, &refresh_token)?;
@@ -287,7 +287,7 @@ pub fn disconnect_account(app_handle: &tauri::AppHandle, account_id: &str) -> Re
 
 pub async fn revoke_account(app_handle: &tauri::AppHandle, account_id: &str) -> Result<(), String> {
     let credential = read_credential(account_id)?;
-    let response = Client::new()
+    let response = crate::cloud_io::http_client()?
         .post("https://oauth2.googleapis.com/revoke")
         .form(&[("token", credential.refresh_token.as_str())])
         .send()
@@ -323,7 +323,7 @@ pub async fn trash_items(
     }
 
     let mut access_token = refresh_access_token(account_id).await?;
-    let http = Client::new();
+    let http = crate::cloud_io::http_client()?;
     let path = cache_path(app_handle, account_id)?;
     let cache = read_cache(&path, account_id);
     let total = item_ids.len() as u64;
@@ -413,7 +413,12 @@ pub fn start_scan(
         .unwrap_or_else(|item| item.into_inner())
         .remove(&account_id);
     tauri::async_runtime::spawn(async move {
-        match scan_account(&app_handle, &account_id, force_full).await {
+        match crate::cloud_io::cancellable(
+            scan_account(&app_handle, &account_id, force_full),
+            || ensure_scan_active(&account_id),
+        )
+        .await
+        {
             Ok(path) => {
                 app_handle
                     .emit(
@@ -477,7 +482,7 @@ async fn scan_account(
 ) -> Result<PathBuf, String> {
     ensure_scan_active(account_id)?;
     let access_token = refresh_access_token(account_id).await?;
-    let http = Client::new();
+    let http = crate::cloud_io::http_client()?;
     let about = fetch_about(&http, &access_token).await?;
     upsert_account(app_handle, account_from_about(&about))?;
     let path = cache_path(app_handle, account_id)?;
@@ -927,7 +932,7 @@ fn oauth_client(
 }
 
 fn oauth_http_client() -> Result<Client, String> {
-    Client::builder()
+    crate::cloud_io::client_builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|err| format!("Could not configure OAuth client: {err}"))

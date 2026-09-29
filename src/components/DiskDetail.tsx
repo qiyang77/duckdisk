@@ -48,6 +48,7 @@ type ScanStatus = {
   permissionDenied: number;
   interrupted: number;
   other: number;
+  cloudSkipped?: number;
 };
 
 type VolumeUsage = {
@@ -163,13 +164,14 @@ type ScanErrorCounts = {
   permissionDenied: number;
   interrupted: number;
   other: number;
+  cloudSkipped?: number;
 };
 
 type ScanErrorRecord = {
   operation: string;
   path: string;
   reason: string;
-  kind: keyof ScanErrorCounts;
+  kind: keyof ScanErrorCounts | "cloudPlaceholder";
 };
 
 type ScanErrorReport = {
@@ -318,6 +320,7 @@ const emptyScanErrorCounts = {
   permissionDenied: 0,
   interrupted: 0,
   other: 0,
+  cloudSkipped: 0,
 };
 const emptyScanErrorReport = {
   counts: emptyScanErrorCounts,
@@ -395,6 +398,7 @@ const formatScanIssueCounts = (counts: ScanErrorCounts) => {
   if (counts.other) {
     parts.push(`other ${counts.other}`);
   }
+  if (counts.cloudSkipped) parts.push(`cloud skipped ${counts.cloudSkipped}`);
 
   return parts.join(" - ");
 };
@@ -1402,8 +1406,9 @@ const Scanning = () => {
   const unscannedSpace = Math.max(0, volumeUsedSpace - rootUsageSize);
   const scannedTotal = status?.total || 0;
   const issueCount = totalScanIssues(scanIssueReport.counts);
+  const cloudSkippedCount = scanIssueReport.counts.cloudSkipped || 0;
   const canOpenScanIssues =
-    !isCloud && (issueCount > 0 || loadedFromCache);
+    !isCloud && (issueCount > 0 || cloudSkippedCount > 0 || loadedFromCache);
   const scanPercent =
     used > 0 ? Math.min(100, (Math.min(scannedTotal, used) / used) * 100) : 0;
   const hasDeterminateProgress =
@@ -1650,6 +1655,7 @@ const Scanning = () => {
     const needsHydration =
       canRefreshItem &&
       isDirectory(node) &&
+      !node.scanSkippedReason &&
       getChildren(node).length === 0 &&
       !hydratedDirectoryIds.current.has(node.id);
     if (!needsHydration) {
@@ -1917,7 +1923,7 @@ const Scanning = () => {
                     } - ${formatBytes(status.total)}${
                       scanPhase === "incremental" ? " rescanned" : ""
                     }${hasDeterminateProgress ? ` - ${scanPercent.toFixed(1)}%` : ""}${
-                    totalScanIssues(status) ? ` - ${formatScanIssueCounts(status)}` : ""
+                    totalScanIssues(status) || status.cloudSkipped ? ` - ${formatScanIssueCounts(status)}` : ""
                   }`
                 : "Waiting for scan progress"}
             </div>
@@ -2016,6 +2022,11 @@ const Scanning = () => {
                 Cached
               </span>
             )}
+            {currentNode?.scanSkippedReason && (
+              <span className="status-chip status-chip-cloud" title={`${currentNode.scanSkippedReason} Download it in Finder, then use Refresh This Folder or Rescan.`}>
+                Cloud-only · not scanned
+              </span>
+            )}
           </div>
         </div>
         <div className="results-actions">
@@ -2046,6 +2057,7 @@ const Scanning = () => {
               <AlertTriangle size={14} />
               Scan Issues
               {issueCount ? ` ${issueCount}` : ""}
+              {cloudSkippedCount ? ` · ${cloudSkippedCount} cloud skipped` : ""}
             </button>
           )}
           <button
@@ -2077,7 +2089,7 @@ const Scanning = () => {
           <div className="metric">
             <div className="metric-label">Size</div>
             <div className="metric-value tabular-nums">
-              {formatBytes(currentSize)}
+              {currentNode?.scanSkippedReason ? "—" : formatBytes(currentSize)}
             </div>
           </div>
           {showsAllocated && (
@@ -2091,19 +2103,19 @@ const Scanning = () => {
           <div className="metric">
             <div className="metric-label">Items</div>
             <div className="metric-value tabular-nums">
-              {currentStats.items.toLocaleString()}
+              {currentNode?.scanSkippedReason ? "—" : currentStats.items.toLocaleString()}
             </div>
           </div>
           <div className="metric">
             <div className="metric-label">Files</div>
             <div className="metric-value tabular-nums">
-              {currentStats.files.toLocaleString()}
+              {currentNode?.scanSkippedReason ? "—" : currentStats.files.toLocaleString()}
             </div>
           </div>
           <div className="metric">
             <div className="metric-label">Folders</div>
             <div className="metric-value tabular-nums">
-              {currentStats.folders.toLocaleString()}
+              {currentNode?.scanSkippedReason ? "—" : currentStats.folders.toLocaleString()}
             </div>
           </div>
           {volumeUsage && volumeUsage.totalSpace > 0 && (
@@ -2429,6 +2441,11 @@ const Scanning = () => {
                               Shared
                             </span>
                           )}
+                          {node.scanSkippedReason && (
+                            <span className="tree-cloud-skip" title={`${node.scanSkippedReason} Download in Finder and refresh to enumerate contents.`}>
+                              Cloud-only · skipped
+                            </span>
+                          )}
                           {refreshing && (
                             <span
                               className="tree-loading-label"
@@ -2443,15 +2460,15 @@ const Scanning = () => {
                       <td className="border-b border-slate-800 px-2 py-1.5">
                         <PercentBar percent={percent} />
                       </td>
-                      <NumberCell>{formatBytes(stats.size)}</NumberCell>
+                      <NumberCell>{node.scanSkippedReason ? "—" : formatBytes(stats.size)}</NumberCell>
                       {showsAllocated && (
                         <NumberCell>
                           {formatBytes(stats.allocatedSize)}
                         </NumberCell>
                       )}
-                      <NumberCell>{stats.items.toLocaleString()}</NumberCell>
-                      <NumberCell>{stats.files.toLocaleString()}</NumberCell>
-                      <NumberCell>{stats.folders.toLocaleString()}</NumberCell>
+                      <NumberCell>{node.scanSkippedReason ? "—" : stats.items.toLocaleString()}</NumberCell>
+                      <NumberCell>{node.scanSkippedReason ? "—" : stats.files.toLocaleString()}</NumberCell>
+                      <NumberCell>{node.scanSkippedReason ? "—" : stats.folders.toLocaleString()}</NumberCell>
                     </tr>
                   );
                 })}
@@ -2919,6 +2936,14 @@ const Scanning = () => {
                   also affect this difference.
                 </p>
               </section>
+              {cloudSkippedCount > 0 && <section>
+                <h3>Cloud-only content</h3>
+                <p>
+                  {cloudSkippedCount.toLocaleString()} cloud paths were deliberately skipped to avoid automatic downloads.
+                  Download them in Finder and rescan if you want their contents enumerated.
+                  Their remote content is not local disk usage and cannot be assigned a byte share of this difference.
+                </p>
+              </section>}
               <p className="unscanned-disclaimer">
                 These categories can overlap; no exact per-category sizes are
                 inferred from the difference. Deleted or refreshed shared files
@@ -2938,7 +2963,7 @@ const Scanning = () => {
                   Scan Issues
                 </div>
                 <div className="mt-1 text-xs text-slate-400">
-                  {issueCount
+                  {issueCount || cloudSkippedCount
                     ? formatScanIssueCounts(scanIssueReport.counts)
                     : "No scan issues recorded for this result"}
                 </div>
@@ -2965,7 +2990,11 @@ const Scanning = () => {
                 </button>
               </div>
             </div>
-            <div className="grid grid-cols-4 gap-px border-b border-slate-700 bg-slate-700 text-xs">
+            <div className="grid grid-cols-5 gap-px border-b border-slate-700 bg-slate-700 text-xs">
+              <div className="bg-[#111827] px-3 py-2">
+                <div className="text-[#7daabf]">Cloud-only skipped</div>
+                <div className="mt-1 font-semibold text-[#9cd7ed]">{cloudSkippedCount.toLocaleString()}</div>
+              </div>
               <div className="bg-[#111827] px-3 py-2">
                 <div className="text-slate-500">Not permitted</div>
                 <div className="mt-1 font-semibold text-slate-100">
@@ -3002,13 +3031,15 @@ const Scanning = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {scanIssueReport.records.map((record, index) => (
+                    {scanIssueReport.records.slice(0, 1000).map((record, index) => (
                       <tr
                         key={`${record.path}-${index}`}
                         className="bg-[#0b1220] hover:bg-[#111827]"
                       >
                         <td className="whitespace-nowrap border-b border-slate-800 px-2 py-1.5 text-slate-200">
-                          {record.reason}
+                          {record.kind === "cloudPlaceholder"
+                            ? "Cloud content not downloaded; skipped to avoid automatic download"
+                            : record.reason}
                         </td>
                         <td className="whitespace-nowrap border-b border-slate-800 px-2 py-1.5 text-slate-300">
                           {record.operation}
@@ -3032,6 +3063,11 @@ const Scanning = () => {
                     ? "This result came from cache, so there is no issue report attached. Use Rescan for a fresh full scan."
                     : "No scan issues were recorded."}
                 </div>
+              )}
+              {scanIssueReport.records.length > 1000 && (
+                <p className="p-3 text-xs text-slate-400">
+                  Showing the first 1,000 of {scanIssueReport.records.length.toLocaleString()} recorded paths. Counts above cover the complete report.
+                </p>
               )}
             </div>
           </div>

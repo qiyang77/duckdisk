@@ -810,6 +810,19 @@ a:focus-visible,
   color: #65c895;
 }
 
+.status-chip-cloud {
+  border-color: #385767;
+  background: #192c37;
+  color: #91c9df;
+}
+
+.tree-cloud-skip {
+  margin-left: 6px;
+  flex-shrink: 0;
+  color: #85bbd0;
+  font-size: 10px;
+}
+
 .results-metrics {
   grid-column: 1 / -1;
   display: grid;

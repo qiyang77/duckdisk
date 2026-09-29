@@ -1,4 +1,4 @@
-use std::collections::{hash_map::DefaultHasher, HashSet};
+use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -34,6 +34,7 @@ struct Payload {
     permission_denied: u64,
     interrupted: u64,
     other: u64,
+    cloud_skipped: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -52,6 +53,8 @@ struct ScanErrorCounts {
     permission_denied: u64,
     interrupted: u64,
     other: u64,
+    #[serde(default)]
+    cloud_skipped: u64,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -70,7 +73,8 @@ struct CacheIndex {
     children: Vec<CacheIndexEntry>,
 }
 
-const CACHE_INDEX_VERSION: &str = "duckdisk-cache-index-v5-preserve-deduplicated-totals";
+const CACHE_INDEX_VERSION: &str = "duckdisk-cache-index-v6-no-cloud-materialization";
+const SCAN_CANCELLED_MESSAGE: &str = "Local scan cancelled.";
 
 impl CacheIndex {
     fn matches_scan(&self, scan_path: &str, ratio: &str) -> bool {
@@ -85,12 +89,14 @@ struct CacheIndexEntry {
     is_dir: bool,
     modified_ms: u128,
     len: u64,
+    #[serde(default)]
+    cloud_placeholder: bool,
 }
 
 // Start scan
 pub fn start(
     app_handle: tauri::AppHandle,
-    state: tauri::State<'_, MyState>,
+    _state: tauri::State<'_, MyState>,
     path: String,
     ratio: String,
     use_cache: bool,
@@ -132,6 +138,7 @@ pub fn start(
                             .ok();
                     }
                 },
+                Err(err) if err == SCAN_CANCELLED_MESSAGE => {}
                 Err(err) => {
                     app_handle.emit("scan_failed", err).ok();
                 }
@@ -144,196 +151,33 @@ pub fn start(
         return Ok(());
     }
 
-    let mut paths_to_scan = scan_args(&ratio_arg);
-    paths_to_scan.extend(scan_targets(&path));
-
-    let progress_regex = Regex::new(
-        r"\(scanned ([0-9]+), total ([0-9]+)(?:, linked [0-9]+, shared [0-9]+)?(?:, erred ([0-9]+))?\)",
-    )
-    .expect("valid progress regex");
-    let error_regex = Regex::new(r#"^\[error\] (\S+) "(.+)": (.+)$"#).expect("valid error regex");
-
-    let (mut rx, child) = app_handle
-        .shell()
-        .sidecar("pdu")
-        .expect("failed to create `my-sidecar` binary command")
-        .args(paths_to_scan)
-        .spawn()
-        .expect("Failed to spawn sidecar");
-    let child_pid = register_child(&state, child);
-
-    // unlisten to the event using the `id` returned on the `listen_global` function
-    // an `once_global` API is also exposed on the `App` struct
-
+    let targets = scan_targets(&path);
     tauri::async_runtime::spawn(async move {
-        let mut items = 0;
-        let mut total = 0;
-        let mut error_records: Vec<ScanErrorRecord> = Vec::new();
-
-        while let Some(event) = rx.recv().await {
-            match event {
-                CommandEvent::Stdout(line) => {
-                    let line = String::from_utf8_lossy(&line);
-                    app_handle.emit("scan_finalizing", ()).ok();
-                    let error_report = build_error_report(error_records.clone());
-                    let normalized = normalize_pdu_content(&line);
-                    match normalized.and_then(|content| {
-                        write_scan_result(&content).map_err(|err| err.to_string())
-                    }) {
-                        Ok(path) => match write_scan_error_report(&error_report) {
-                            Ok(errors_path) => {
-                                app_handle
-                                    .emit(
-                                        "scan_completed",
-                                        CompletedPayload {
-                                            path: path.display().to_string(),
-                                            errors_path: errors_path.display().to_string(),
-                                        },
-                                    )
-                                    .ok();
-                            }
-                            Err(err) => {
-                                app_handle
-                                    .emit(
-                                        "scan_failed",
-                                        format!("Failed to write scan error report: {err}"),
-                                    )
-                                    .ok();
-                            }
-                        },
-                        Err(err) => {
-                            app_handle
-                                .emit("scan_failed", format!("Failed to write scan result: {err}"))
-                                .ok();
-                        }
-                    }
-                }
-                CommandEvent::Stderr(line) => {
-                    let line = String::from_utf8_lossy(&line);
-                    if collect_scan_stderr(
-                        &line,
-                        &progress_regex,
-                        &error_regex,
-                        &mut items,
-                        &mut total,
-                        &mut error_records,
-                    ) {
-                        emit_scan_status(&app_handle, items, total, &error_records);
-                    }
-                }
-                CommandEvent::Terminated(t) => {
-                    println!("{t:?}");
-                    unregister_child(&app_handle.state::<MyState>(), child_pid);
-                    // app_handle.unlisten(id);
-                    // child.kill();
-                }
-                CommandEvent::Error(error) => {
-                    app_handle.emit("scan_failed", error).ok();
-                }
-                _ => {}
-            };
-            // if let CommandEvent::Stdout(line) = event {
-            //     println!("StdErr: {}", line);
-            // } else {
-            //     println!("Terminated {}", event);
-            // }
-            // if let CommandEvent::Stderr(line) = event {
-            //     println!("StdErr: {}", line);
-            // }
-            // if let CommandEvent::Terminated(line) = event {
-            //     println!("Terminated");
-            // }
+        let result = async {
+            let (parsed, report) = run_pdu_for_paths(&app_handle, &ratio_arg, &targets).await?;
+            app_handle.emit("scan_finalizing", ()).ok();
+            let parsed = parsed.ok_or_else(|| "Local scanner produced no result".to_string())?;
+            let content = serde_json::to_string(&parsed).map_err(|error| error.to_string())?;
+            let result_path = write_scan_result(&content).map_err(|error| error.to_string())?;
+            let errors_path =
+                write_scan_error_report(&report).map_err(|error| error.to_string())?;
+            Ok::<_, String>(CompletedPayload {
+                path: result_path.display().to_string(),
+                errors_path: errors_path.display().to_string(),
+            })
         }
-        Result::<(), ()>::Ok(())
+        .await;
+        match result {
+            Ok(payload) => {
+                app_handle.emit("scan_completed", payload).ok();
+            }
+            Err(message) if message == SCAN_CANCELLED_MESSAGE => {}
+            Err(message) => {
+                app_handle.emit("scan_failed", message).ok();
+            }
+        }
     });
-
     Ok(())
-    // thread::spawn(move || {
-    //     let path = PathBuf::from(path);
-    //     let mut vec: Vec<PathBuf> = Vec::new();
-    //     vec.push(path);
-
-    //     fn progress_and_error_reporter<Data>(
-    //         app_handle: tauri::AppHandle,
-    //     ) -> ProgressAndErrorReporter<Data, fn(ErrorReport)>
-    //     where
-    //         Data: Size + Into<u64> + Send + Sync,
-    //         ProgressReport<Data>: Default + 'static,
-    //         u64: Into<Data>,
-    //     {
-    //         let progress_reporter = move |report: ProgressReport<Data>| {
-    //             let ProgressReport {
-    //                 items,
-    //                 total,
-    //                 errors,
-    //             } = report;
-    //             let mut text = String::new();
-    //             write!(
-    //                 text,
-    //                 "\r(scanned {items}, total {total}",
-    //                 items = items,
-    //                 total = total.into(),
-    //             )
-    //             .unwrap();
-    //             if errors != 0 {
-    //                 write!(text, ", erred {}", errors).unwrap();
-    //             }
-    //             write!(text, ")").unwrap();
-    //             println!("{}", text);
-    //             app_handle
-    //                 .emit(
-    //                     "scan_status",
-    //                     Payload {
-    //                         items: items,
-    //                         total: total.into(),
-    //                         errors: errors,
-    //                     },
-    //                 )
-    //                 .unwrap();
-    //         };
-
-    //         struct TextReport<'a>(ErrorReport<'a>);
-
-    //         impl<'a> Display for TextReport<'a> {
-    //             fn fmt(&self, formatter: &mut Formatter<'_>) -> Result<(), Error> {
-    //                 write!(
-    //                     formatter,
-    //                     "[error] {operation} {path:?}: {error}",
-    //                     operation = self.0.operation.name(),
-    //                     path = self.0.path,
-    //                     error = self.0.error,
-    //                 )
-    //             }
-    //         }
-
-    //         let error_reporter: fn(ErrorReport) = |report| {
-    //             let message = TextReport(report).to_string();
-    //             println!("{}", message);
-    //         };
-
-    //         ProgressAndErrorReporter::new(
-    //             progress_reporter,
-    //             Duration::from_millis(100),
-    //             error_reporter,
-    //         )
-    //     }
-    //     // pub struct MyReporter {}
-    //     // impl parallel_disk_usage::reporter::progress_and_error_reporter
-    //     let pdu = parallel_disk_usage::app::Sub {
-    //         json_output: true,
-    //         direction: Direction::BottomUp,
-    //         bar_alignment: BarAlignment::Right,
-    //         get_data: GET_APPARENT_SIZE,
-    //         files: vec,
-    //         no_sort: true,
-    //         min_ratio: 0.01.try_into().unwrap(),
-    //         max_depth: 10.try_into().unwrap(),
-    //         reporter: progress_and_error_reporter(app_handle),
-    //         bytes_format: BytesFormat::MetricUnits,
-    //         column_width_distribution: ColumnWidthDistribution::total(100),
-    //     }
-    //     .run();
-    // });
 }
 
 fn scan_args(ratio: &str) -> Vec<String> {
@@ -353,9 +197,8 @@ fn emit_scan_status(
     app_handle: &tauri::AppHandle,
     items: u64,
     total: u64,
-    records: &[ScanErrorRecord],
+    counts: &ScanErrorCounts,
 ) {
-    let counts = count_scan_errors(records);
     app_handle
         .emit(
             "scan_status",
@@ -366,6 +209,7 @@ fn emit_scan_status(
                 permission_denied: counts.permission_denied,
                 interrupted: counts.interrupted,
                 other: counts.other,
+                cloud_skipped: counts.cloud_skipped,
             },
         )
         .ok();
@@ -389,6 +233,7 @@ fn collect_scan_stderr(
     items: &mut u64,
     total: &mut u64,
     error_records: &mut Vec<ScanErrorRecord>,
+    counts: &mut ScanErrorCounts,
 ) -> bool {
     let mut changed = false;
     // pdu updates progress with carriage returns. A shell stderr event may contain
@@ -410,6 +255,7 @@ fn collect_scan_stderr(
             changed = true;
         }
         if let Some(record) = parse_scan_error(error_regex, segment) {
+            increment_scan_count(counts, &record.kind);
             error_records.push(record);
             changed = true;
         }
@@ -418,7 +264,11 @@ fn collect_scan_stderr(
 }
 
 fn classify_scan_error(reason: &str) -> &'static str {
-    if reason.contains("Operation not permitted") {
+    if reason.contains("DuckDisk cloud placeholder skipped")
+        || (reason.to_ascii_lowercase().contains("deadlock") && reason.contains("(os error 11)"))
+    {
+        "cloudPlaceholder"
+    } else if reason.contains("Operation not permitted") {
         "operationNotPermitted"
     } else if reason.contains("Permission denied") {
         "permissionDenied"
@@ -432,14 +282,19 @@ fn classify_scan_error(reason: &str) -> &'static str {
 fn count_scan_errors(records: &[ScanErrorRecord]) -> ScanErrorCounts {
     let mut counts = ScanErrorCounts::default();
     for record in records {
-        match record.kind.as_str() {
-            "operationNotPermitted" => counts.operation_not_permitted += 1,
-            "permissionDenied" => counts.permission_denied += 1,
-            "interrupted" => counts.interrupted += 1,
-            _ => counts.other += 1,
-        }
+        increment_scan_count(&mut counts, &record.kind);
     }
     counts
+}
+
+fn increment_scan_count(counts: &mut ScanErrorCounts, kind: &str) {
+    match kind {
+        "operationNotPermitted" => counts.operation_not_permitted += 1,
+        "permissionDenied" => counts.permission_denied += 1,
+        "interrupted" => counts.interrupted += 1,
+        "cloudPlaceholder" => counts.cloud_skipped += 1,
+        _ => counts.other += 1,
+    }
 }
 
 fn build_error_report(records: Vec<ScanErrorRecord>) -> ScanErrorReport {
@@ -488,7 +343,22 @@ async fn incremental_scan(
     let mut cached_json: Value =
         serde_json::from_str(&cached_content).map_err(|err| err.to_string())?;
 
-    let current_entries = current_child_entries(scan_path)?;
+    let current_entries = match current_child_entries(scan_path) {
+        Ok(entries) => entries,
+        Err(_) => {
+            // The cached root may have been evicted to the cloud since the last
+            // scan. Reinspect it in the protected sidecar rather than removing
+            // its old children and presenting it as an empty directory.
+            app_handle.emit("scan_full", ()).ok();
+            let (parsed, report) =
+                run_pdu_for_paths(app_handle, ratio_arg, &scan_targets(scan_path)).await?;
+            let parsed = parsed.ok_or_else(|| "Local scanner produced no result".to_string())?;
+            let content = serde_json::to_string(&parsed).map_err(|err| err.to_string())?;
+            return write_scan_result(&content)
+                .map(|path| (path, report))
+                .map_err(|err| err.to_string());
+        }
+    };
     let indexed_paths: HashSet<String> = index
         .children
         .iter()
@@ -510,6 +380,7 @@ async fn incremental_scan(
                     cached.modified_ms != entry.modified_ms
                         || cached.len != entry.len
                         || cached.is_dir != entry.is_dir
+                        || cached.cloud_placeholder != entry.cloud_placeholder
                 })
                 .unwrap_or(true)
         })
@@ -558,8 +429,14 @@ pub async fn refresh_path(
     if !target.starts_with(scan_root) {
         return Err("The selected item is outside the current scan".to_string());
     }
-    if !target.exists() {
-        return Err("The selected item no longer exists".to_string());
+    {
+        let _guard = crate::no_cloud_download::ScanIoGuard::new()?;
+        if !target.exists() {
+            return Err(
+                "The selected item no longer exists or its cloud content has not been downloaded"
+                    .to_string(),
+            );
+        }
     }
 
     let ratio_arg = format!("--min-ratio={ratio}");
@@ -637,6 +514,11 @@ async fn run_pdu_for_paths(
     let mut items = 0;
     let mut total = 0;
     let mut error_records = Vec::new();
+    let mut counts = ScanErrorCounts::default();
+    let mut last_emit = std::time::Instant::now();
+    let mut termination = None;
+    let mut diagnostic = String::new();
+    let mut reader_error = None;
 
     while let Some(event) = rx.recv().await {
         match event {
@@ -652,21 +534,53 @@ async fn run_pdu_for_paths(
                     &mut items,
                     &mut total,
                     &mut error_records,
+                    &mut counts,
                 ) {
-                    emit_scan_status(app_handle, items, total, &error_records);
+                    if last_emit.elapsed() >= std::time::Duration::from_millis(100) {
+                        emit_scan_status(app_handle, items, total, &counts);
+                        last_emit = std::time::Instant::now();
+                    }
+                } else if !line.trim().is_empty() {
+                    diagnostic = line.trim().chars().take(1024).collect();
                 }
             }
-            CommandEvent::Terminated(_) => {}
-            CommandEvent::Error(error) => return Err(error),
+            CommandEvent::Terminated(result) => {
+                termination = Some(result);
+            }
+            CommandEvent::Error(error) => {
+                reader_error = Some(error);
+                break;
+            }
             _ => {}
         }
     }
     unregister_child(&app_handle.state::<MyState>(), child_pid);
+    emit_scan_status(app_handle, items, total, &counts);
+    if let Some(error) = reader_error {
+        return Err(error);
+    }
+
+    if let Some(termination) = termination {
+        if termination.signal == Some(9) {
+            return Err(SCAN_CANCELLED_MESSAGE.into());
+        }
+        if termination.code != Some(0) {
+            return Err(format!(
+                "Local scanner stopped without completing: {diagnostic}"
+            ));
+        }
+    }
+    if stdout.is_none() {
+        return Err("Local scanner produced no result".into());
+    }
 
     let error_report = build_error_report(error_records);
-    let parsed = stdout
+    let mut parsed = stdout
         .map(|content| parse_pdu_content(&content))
         .transpose()?;
+    if let Some(parsed) = parsed.as_mut() {
+        annotate_cloud_skips(parsed, &error_report);
+    }
     Ok((parsed, error_report))
 }
 
@@ -680,8 +594,39 @@ fn parse_pdu_content(content: &str) -> Result<Value, String> {
     Ok(parsed)
 }
 
-fn normalize_pdu_content(content: &str) -> Result<String, String> {
-    serde_json::to_string(&parse_pdu_content(content)?).map_err(|err| err.to_string())
+fn annotate_cloud_skips(parsed: &mut Value, report: &ScanErrorReport) {
+    let skipped: HashMap<_, _> = report
+        .records
+        .iter()
+        .filter(|record| record.kind == "cloudPlaceholder")
+        .map(|record| {
+            (
+                PathBuf::from(&record.path),
+                "Cloud content not downloaded; skipped to avoid automatic download.",
+            )
+        })
+        .collect();
+    fn walk(node: &mut Value, parent: &Path, skipped: &HashMap<PathBuf, &str>) {
+        let name = node.get("name").and_then(Value::as_str).unwrap_or_default();
+        let path = if name == "(total)" {
+            PathBuf::from("/")
+        } else if Path::new(name).is_absolute() {
+            PathBuf::from(name)
+        } else {
+            parent.join(name)
+        };
+        if let Some(reason) = skipped.get(&path) {
+            node["scanSkippedReason"] = Value::from(*reason);
+        }
+        if let Some(children) = node.get_mut("children").and_then(Value::as_array_mut) {
+            for child in children {
+                walk(child, &path, skipped);
+            }
+        }
+    }
+    if let Some(tree) = parsed.get_mut("tree") {
+        walk(tree, Path::new("/"), &skipped);
+    }
 }
 
 fn normalize_pdu_tree(node: &mut Value) -> Result<(), String> {
@@ -1104,6 +1049,7 @@ fn write_cache_index(
     ratio: &str,
     content: &str,
 ) -> Result<(), String> {
+    let _guard = crate::no_cloud_download::ScanIoGuard::new()?;
     let parsed: Value = serde_json::from_str(content).map_err(|err| err.to_string())?;
     let Some(tree) = parsed.get("tree") else {
         return Ok(());
@@ -1138,6 +1084,17 @@ fn write_cache_index(
 }
 
 fn current_child_entries(scan_path: &str) -> Result<Vec<CacheIndexEntry>, String> {
+    let _guard = crate::no_cloud_download::ScanIoGuard::new()?;
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::macos::fs::MetadataExt;
+        if fs::symlink_metadata(scan_path)
+            .map(|metadata| metadata.is_dir() && metadata.st_flags() & 0x4000_0000 != 0)
+            .unwrap_or(false)
+        {
+            return Err("Cached root is a cloud placeholder; protected rescan required".into());
+        }
+    }
     let paths = if scan_path == "/" {
         scan_targets(scan_path)
     } else {
@@ -1156,6 +1113,13 @@ fn current_child_entries(scan_path: &str) -> Result<Vec<CacheIndexEntry>, String
 
 fn metadata_entry(path: &str) -> Option<CacheIndexEntry> {
     let metadata = fs::metadata(path).ok()?;
+    #[cfg(target_os = "macos")]
+    let cloud_placeholder = {
+        use std::os::macos::fs::MetadataExt;
+        metadata.st_flags() & 0x4000_0000 != 0
+    };
+    #[cfg(not(target_os = "macos"))]
+    let cloud_placeholder = false;
     Some(CacheIndexEntry {
         path: path.to_string(),
         is_dir: metadata.is_dir(),
@@ -1166,6 +1130,7 @@ fn metadata_entry(path: &str) -> Option<CacheIndexEntry> {
             .map(|duration| duration.as_millis())
             .unwrap_or_default(),
         len: metadata.len(),
+        cloud_placeholder,
     })
 }
 
@@ -1204,12 +1169,56 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn cloud_skips_are_distinct_from_permission_errors_and_annotate_nested_nodes() {
+        let reason = "DuckDisk cloud placeholder skipped: automatic download disabled";
+        let report = build_error_report(vec![
+            ScanErrorRecord {
+                operation: "symlink_metadata".into(),
+                path: "/Users/test/cloud".into(),
+                reason: reason.into(),
+                kind: classify_scan_error(reason).into(),
+            },
+            ScanErrorRecord {
+                operation: "read_dir".into(),
+                path: "/Users/test/blocked".into(),
+                reason: "Resource deadlock avoided (os error 11)".into(),
+                kind: classify_scan_error("Resource deadlock avoided (os error 11)").into(),
+            },
+        ]);
+        assert_eq!(report.counts.cloud_skipped, 2);
+        assert_eq!(report.counts.other, 0);
+        let mut parsed = json!({"tree": {"name": "(total)", "children": [
+            {"name": "/Users", "children": [{"name": "test", "children": [
+                {"name": "cloud", "children": []}, {"name": "local", "children": []}
+            ]}]}
+        ]}});
+        annotate_cloud_skips(&mut parsed, &report);
+        let children = &parsed["tree"]["children"][0]["children"][0]["children"];
+        assert!(children[0]["scanSkippedReason"]
+            .as_str()
+            .unwrap()
+            .contains("not downloaded"));
+        assert!(children[1].get("scanSkippedReason").is_none());
+    }
+
+    #[test]
+    fn older_error_counts_default_cloud_skips_to_zero() {
+        let counts: ScanErrorCounts = serde_json::from_value(json!({
+            "permissionDenied": 1, "operationNotPermitted": 2, "interrupted": 3, "other": 4
+        }))
+        .unwrap();
+        assert_eq!(counts.cloud_skipped, 0);
+        assert_eq!(counts.permission_denied, 1);
+    }
+
+    #[test]
     fn stderr_keeps_errors_after_carriage_return_progress() {
         let progress_regex = Regex::new(r"\(scanned ([0-9]+), total ([0-9]+)\)").unwrap();
         let error_regex = Regex::new(r#"^\[error\] (\S+) "(.+)": (.+)$"#).unwrap();
         let mut items = 0;
         let mut total = 0;
         let mut records = Vec::new();
+        let mut counts = ScanErrorCounts::default();
 
         let changed = collect_scan_stderr(
             "\r(scanned 12, total 50)\r[error] read_dir \"/protected\": Operation not permitted (os error 1)\n\r(scanned 25, total 50)\r[error] read_dir \"/restricted\": Permission denied (os error 13)\n",
@@ -1218,6 +1227,7 @@ mod tests {
             &mut items,
             &mut total,
             &mut records,
+            &mut counts,
         );
 
         assert!(changed);

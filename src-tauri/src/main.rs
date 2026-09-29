@@ -1,6 +1,8 @@
+mod cloud_io;
 #[cfg(feature = "google-drive")]
 mod google_drive;
 mod local_files;
+mod no_cloud_download;
 mod oauth_config;
 mod onedrive;
 mod scan;

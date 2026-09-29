@@ -20,7 +20,8 @@ Website: https://duckdisk.com/
 
 ## What's New in v0.6.4
 
-- Prevented local scans from blocking while macOS downloads cloud-placeholder directories.
+- Local scans now disable automatic cloud materialization before scanning and mark skipped cloud-only content explicitly instead of presenting it as empty.
+- Corrected logical sizes for ordinary sparse files and added cloud request timeouts with prompt scan cancellation.
 - Corrected apparent and allocated totals to preserve the scanner's hard-link deduplication during display, incremental updates, and folder refreshes.
 - Added disk total, macOS used, color-coded free space, and **Unscanned** statistics to whole-volume results. The question-mark button explains usage outside the scan without inventing per-category sizes.
 - Fixed missing permission-error reports and preserved scan issues in cached results, with a warning button for unreadable paths.

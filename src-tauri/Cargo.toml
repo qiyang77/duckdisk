@@ -23,7 +23,7 @@ tauri = { version = "2", features = [] }
 sysinfo = "0.27.7"
 oauth2 = { version = "5.0", default-features = false, features = ["reqwest", "rustls-tls"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "rt"] }
 url = "2"
 base64 = { version = "0.22", optional = true }
 ssh2 = { version = "0.9.6", optional = true, features = ["vendored-openssl"] }
