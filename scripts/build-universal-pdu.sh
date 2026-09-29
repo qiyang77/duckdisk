@@ -35,8 +35,8 @@ lipo -create \
   "$build_dir/source/target/x86_64-apple-darwin/release/pdu" \
   -output "$output"
 chmod 755 "$output"
-lipo -verify_arch arm64 "$output"
-lipo -verify_arch x86_64 "$output"
+lipo "$output" -verify_arch arm64
+lipo "$output" -verify_arch x86_64
 "$output" --help | grep -q "dual-size"
 
 echo "Built universal DuckDisk pdu $pdu_version: $(lipo -archs "$output")"
