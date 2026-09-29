@@ -516,7 +516,7 @@ pub async fn delete_items(
     }
 
     let mut access_token = refresh_access_token(account_id).await?;
-    let http = crate::cloud_io::http_client()?;
+    let http = crate::cloud_io::mutation_client()?;
     let total = item_ids.len() as u64;
     let mut deleted_ids = Vec::new();
     let mut failures = Vec::new();
@@ -951,10 +951,13 @@ async fn graph_delete(http: &Client, access_token: &str, url: &str) -> Result<()
     loop {
         let response = match http.delete(url).bearer_auth(access_token).send().await {
             Ok(response) => response,
-            Err(err) if (err.is_connect() || err.is_timeout()) && attempts < 5 => {
+            Err(err) if err.is_connect() && attempts < 5 => {
                 attempts += 1;
                 tokio::time::sleep(Duration::from_secs(2_u64.pow(attempts).min(30))).await;
                 continue;
+            }
+            Err(err) if err.is_timeout() => {
+                return Err(crate::cloud_io::uncertain_mutation_timeout("OneDrive"));
             }
             Err(err) => {
                 return Err(format!(
@@ -1535,6 +1538,33 @@ mod tests {
                 StatusCode::from_u16(status).unwrap()
             ));
         }
+    }
+
+    #[test]
+    fn timed_out_move_is_uncertain_and_is_not_retried_blindly() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (_socket, _) = listener.accept().unwrap();
+            std::thread::sleep(Duration::from_millis(200));
+        });
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let http = Client::builder()
+            .timeout(Duration::from_millis(40))
+            .build()
+            .unwrap();
+        let started = Instant::now();
+        let result = runtime.block_on(graph_delete(
+            &http,
+            "test-token",
+            &format!("http://{address}/item"),
+        ));
+        assert!(result.unwrap_err().contains("may already have completed"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        server.join().unwrap();
     }
 
     #[test]

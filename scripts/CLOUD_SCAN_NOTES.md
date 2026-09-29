@@ -11,16 +11,27 @@ Scan-related cache metadata operations in the app use a thread-bound RAII
 guard that restores the previous policy before returning. Neither guard
 changes Finder's policy or the user's cloud synchronization settings.
 
-`SF_DATALESS` nodes are retained but not entered. Intentional skips and
-materialization-denied (`EDEADLK`) diagnostics are classified separately from
-permission failures, attached to matching result nodes, and saved with the
-scan cache. The UI displays unknown contents as a dash, not an empty folder.
-Logical size is not inferred from zero allocated blocks: ordinary sparse
-files retain their logical size. The new cache index version requires a
-fresh scan of older cached results.
+`SF_DATALESS` directories are retained but not entered. Cloud-only file and
+folder counts live in the tree, including subtrees omitted from the displayed
+depth. They appear as one summary in Scan Issues instead of generating one
+error record per file. Materialization-denied (`EDEADLK`) diagnostics remain
+separate from permission failures. The UI displays unknown contents as a
+dash, not an empty folder. Ordinary sparse files keep their logical size;
+zero-block files inside OneDrive's private sync mirror are treated as
+remote-only even when `SF_DATALESS` is absent. That layout is an observed,
+private OneDrive implementation detail, so the detector requires contiguous
+cache components and does not claim to recognize every provider or version.
+Complete file and folder counts also survive depth/ratio pruning, keeping
+them comparable to the cloud-only counts. File type breakdowns only include
+individually retained tree nodes, since pruned descendants no longer have
+available extensions. A new cache index version requires a fresh scan of
+older cached results.
 
-Cloud API clients have a 10-second connection timeout and 30-second request
-timeout (including response-body reads). Scan cancellation drops the entire
+Cloud scan API clients have a 10-second connection timeout and 30-second
+request timeout (including response-body reads). Trash moves use a distinct
+120-second request timeout. A move that times out after it may have reached
+the server is not blindly retried; the result is reported as uncertain and
+the user is asked to refresh before retrying. Scan cancellation drops the entire
 pending scan future, checked every 100 ms; this includes token refresh,
 network waits and retry sleeps. Existing provider retry behavior remains.
 Deletion operations are not attached to scan cancellation.

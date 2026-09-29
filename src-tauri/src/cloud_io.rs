@@ -2,18 +2,36 @@ use std::{future::Future, time::Duration};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const MUTATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub fn client_builder() -> reqwest::ClientBuilder {
+    client_builder_with_timeout(REQUEST_TIMEOUT)
+}
+
+fn client_builder_with_timeout(timeout: Duration) -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
+        .timeout(timeout)
 }
 
 pub fn http_client() -> Result<reqwest::Client, String> {
     client_builder()
         .build()
         .map_err(|error| format!("Could not configure cloud HTTP client: {error}"))
+}
+
+/// Moves to cloud trash may finish remotely even if the response is lost.
+/// Give them a separate, longer window; cancellation of a scan never drops
+/// one of these operations.
+pub fn mutation_client() -> Result<reqwest::Client, String> {
+    client_builder_with_timeout(MUTATION_REQUEST_TIMEOUT)
+        .build()
+        .map_err(|error| format!("Could not configure cloud mutation HTTP client: {error}"))
+}
+
+pub fn uncertain_mutation_timeout(provider: &str) -> String {
+    format!("{provider} did not confirm the move before the timeout. It may already have completed remotely; refresh the scan before retrying.")
 }
 
 /// Drop the whole scan future on cancellation, including any pending response,
@@ -136,5 +154,11 @@ mod tests {
                 "failure"
             );
         });
+    }
+
+    #[test]
+    fn mutations_have_a_separate_timeout_and_clear_uncertain_outcome() {
+        assert!(MUTATION_REQUEST_TIMEOUT > REQUEST_TIMEOUT);
+        assert!(uncertain_mutation_timeout("OneDrive").contains("may already have completed"));
     }
 }

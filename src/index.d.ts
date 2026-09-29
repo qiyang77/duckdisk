@@ -9,6 +9,10 @@ interface DiskItem {
   size: number;
   allocatedSize?: number;
   scanSkippedReason?: string;
+  cloudSkippedFiles?: number;
+  cloudSkippedFolders?: number;
+  totalFiles?: number;
+  totalFolders?: number;
   isDirectory: boolean;
   children: Array<DiskItem>;
 }

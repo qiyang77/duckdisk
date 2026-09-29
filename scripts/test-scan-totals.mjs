@@ -16,4 +16,6 @@ assert.equal(adjustedScanTotal(80, [{ before: 100, after: 110 }]), 90);
 assert.equal(adjustedScanTotal(20, [{ before: 100, after: 0 }]), 0);
 assert.equal(adjustedScanTotal(undefined, [{ before: 100, after: 70 }]), 70);
 assert.equal(adjustedScanTotal(80, []), 80);
-console.log("Scan total reconciliation: 6 assertions passed");
+assert.equal(adjustedScanTotal(100, [{ before: 20, after: 0 }]), 80);
+assert.equal(adjustedScanTotal(100, [{ before: 20, after: 30 }]), 110);
+console.log("Scan total reconciliation: 8 assertions passed");

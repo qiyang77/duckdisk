@@ -21,7 +21,9 @@ Website: https://duckdisk.com/
 ## What's New in v0.6.4
 
 - Local scans now disable automatic cloud materialization before scanning and mark skipped cloud-only content explicitly instead of presenting it as empty.
-- Corrected logical sizes for ordinary sparse files and added cloud request timeouts with prompt scan cancellation.
+- Cloud-only files are summarized as one scan issue rather than one warning per file. File and folder totals now include descendants omitted from the displayed tree depth.
+- OneDrive's known cloud-only sync mirror no longer inflates logical size; ordinary sparse files elsewhere keep their logical size.
+- Added cloud request timeouts and prompt scan cancellation. Trash moves have more time to complete and are not blindly retried when the outcome is uncertain.
 - Corrected apparent and allocated totals to preserve the scanner's hard-link deduplication during display, incremental updates, and folder refreshes.
 - Added disk total, macOS used, color-coded free space, and **Unscanned** statistics to whole-volume results. The question-mark button explains usage outside the scan without inventing per-category sizes.
 - Fixed missing permission-error reports and preserved scan issues in cached results, with a warning button for unreadable paths.

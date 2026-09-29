@@ -323,7 +323,7 @@ pub async fn trash_items(
     }
 
     let mut access_token = refresh_access_token(account_id).await?;
-    let http = crate::cloud_io::http_client()?;
+    let http = crate::cloud_io::mutation_client()?;
     let path = cache_path(app_handle, account_id)?;
     let cache = read_cache(&path, account_id);
     let total = item_ids.len() as u64;
@@ -804,10 +804,13 @@ async fn google_trash_item(http: &Client, access_token: &str, item_id: &str) -> 
             .await
         {
             Ok(response) => response,
-            Err(err) if (err.is_connect() || err.is_timeout()) && attempts < 5 => {
+            Err(err) if err.is_connect() && attempts < 5 => {
                 attempts += 1;
                 tokio::time::sleep(Duration::from_secs(2_u64.pow(attempts).min(30))).await;
                 continue;
+            }
+            Err(err) if err.is_timeout() => {
+                return Err(crate::cloud_io::uncertain_mutation_timeout("Google Drive"));
             }
             Err(err) => {
                 return Err(format!(
@@ -817,7 +820,13 @@ async fn google_trash_item(http: &Client, access_token: &str, item_id: &str) -> 
         };
         let status = response.status();
         if status.is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = response.text().await.map_err(|err| {
+                if err.is_timeout() {
+                    crate::cloud_io::uncertain_mutation_timeout("Google Drive")
+                } else {
+                    format!("Google Drive did not return confirmation after the move: {err}. The item may already be in Trash; refresh before retrying.")
+                }
+            })?;
             let updated_file: Value = serde_json::from_str(&body)
                 .map_err(|err| format!("Invalid Google Drive update response: {err}"))?;
             if updated_file

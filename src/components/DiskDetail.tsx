@@ -48,7 +48,6 @@ type ScanStatus = {
   permissionDenied: number;
   interrupted: number;
   other: number;
-  cloudSkipped?: number;
 };
 
 type VolumeUsage = {
@@ -164,7 +163,9 @@ type ScanErrorCounts = {
   permissionDenied: number;
   interrupted: number;
   other: number;
-  cloudSkipped?: number;
+  cloudSkippedFiles?: number;
+  cloudSkippedFolders?: number;
+  cloudSkippedUnknown?: number;
 };
 
 type ScanErrorRecord = {
@@ -320,7 +321,9 @@ const emptyScanErrorCounts = {
   permissionDenied: 0,
   interrupted: 0,
   other: 0,
-  cloudSkipped: 0,
+  cloudSkippedFiles: 0,
+  cloudSkippedFolders: 0,
+  cloudSkippedUnknown: 0,
 };
 const emptyScanErrorReport = {
   counts: emptyScanErrorCounts,
@@ -398,7 +401,9 @@ const formatScanIssueCounts = (counts: ScanErrorCounts) => {
   if (counts.other) {
     parts.push(`other ${counts.other}`);
   }
-  if (counts.cloudSkipped) parts.push(`cloud skipped ${counts.cloudSkipped}`);
+  if ((counts.cloudSkippedFiles || 0) + (counts.cloudSkippedFolders || 0) + (counts.cloudSkippedUnknown || 0) > 0) {
+    parts.push("cloud-only 1 group");
+  }
 
   return parts.join(" - ");
 };
@@ -419,9 +424,9 @@ const buildIndex = (root: DiskItem | null, deletedIds = new Set<string>()) => {
     if (!children.length) {
       const stats = isDirectory(node)
         ? {
-            items: 1,
-            files: 0,
-            folders: 1,
+            items: (node.totalFiles ?? 0) + (node.totalFolders ?? 1),
+            files: node.totalFiles ?? 0,
+            folders: node.totalFolders ?? 1,
             size: node.size || 0,
             allocatedSize: node.allocatedSize ?? node.size ?? 0,
           }
@@ -461,6 +466,25 @@ const buildIndex = (root: DiskItem | null, deletedIds = new Set<string>()) => {
         after: childStats[index].allocatedSize,
       }))
     );
+    if (node.totalFiles !== undefined) {
+      stats.files = adjustedScanTotal(
+        node.totalFiles,
+        children.map((child, index) => ({
+          before: child.totalFiles ?? childStats[index].files,
+          after: childStats[index].files,
+        }))
+      );
+    }
+    if (node.totalFolders !== undefined) {
+      stats.folders = adjustedScanTotal(
+        node.totalFolders,
+        children.map((child, index) => ({
+          before: child.totalFolders ?? childStats[index].folders,
+          after: childStats[index].folders,
+        }))
+      );
+    }
+    stats.items = stats.files + stats.folders;
     statsMap.set(node.id, stats);
     return stats;
   };
@@ -1178,18 +1202,16 @@ const Scanning = () => {
 
       if (scanNonce === 0) {
         try {
-          const cached = await invoke<string | null>("read_cached_scan_result", {
+          const hasIndex = await invoke<boolean>("has_cached_scan_index", {
             scanPath: disk,
             ratio,
           });
-
-          if (!disposed && cached) {
-            const hasIndex = await invoke<boolean>("has_cached_scan_index", {
+          if (!disposed && hasIndex) {
+            const cached = await invoke<string | null>("read_cached_scan_result", {
               scanPath: disk,
               ratio,
             });
-
-            if (!disposed && hasIndex) {
+            if (!disposed && cached) {
               let cachedIssues: ScanErrorReport = emptyScanErrorReport;
               try {
                 const report = await invoke<string | null>(
@@ -1406,9 +1428,14 @@ const Scanning = () => {
   const unscannedSpace = Math.max(0, volumeUsedSpace - rootUsageSize);
   const scannedTotal = status?.total || 0;
   const issueCount = totalScanIssues(scanIssueReport.counts);
-  const cloudSkippedCount = scanIssueReport.counts.cloudSkipped || 0;
+  const cloudSkippedFiles = scanIssueReport.counts.cloudSkippedFiles || 0;
+  const cloudSkippedFolders = scanIssueReport.counts.cloudSkippedFolders || 0;
+  const cloudSkippedUnknown = scanIssueReport.counts.cloudSkippedUnknown || 0;
+  const hasCloudSkipGroup = cloudSkippedFiles + cloudSkippedFolders + cloudSkippedUnknown > 0;
+  const scanIssueButtonCount = issueCount + (hasCloudSkipGroup ? 1 : 0);
+  const listedScanIssues = scanIssueReport.records.filter((record) => record.kind !== "cloudPlaceholder");
   const canOpenScanIssues =
-    !isCloud && (issueCount > 0 || cloudSkippedCount > 0 || loadedFromCache);
+    !isCloud && (scanIssueButtonCount > 0 || loadedFromCache);
   const scanPercent =
     used > 0 ? Math.min(100, (Math.min(scannedTotal, used) / used) * 100) : 0;
   const hasDeterminateProgress =
@@ -1923,7 +1950,7 @@ const Scanning = () => {
                     } - ${formatBytes(status.total)}${
                       scanPhase === "incremental" ? " rescanned" : ""
                     }${hasDeterminateProgress ? ` - ${scanPercent.toFixed(1)}%` : ""}${
-                    totalScanIssues(status) || status.cloudSkipped ? ` - ${formatScanIssueCounts(status)}` : ""
+                    totalScanIssues(status) ? ` - ${formatScanIssueCounts(status)}` : ""
                   }`
                 : "Waiting for scan progress"}
             </div>
@@ -2024,7 +2051,7 @@ const Scanning = () => {
             )}
             {currentNode?.scanSkippedReason && (
               <span className="status-chip status-chip-cloud" title={`${currentNode.scanSkippedReason} Download it in Finder, then use Refresh This Folder or Rescan.`}>
-                Cloud-only · not scanned
+                Cloud-only · no local data
               </span>
             )}
           </div>
@@ -2046,18 +2073,17 @@ const Scanning = () => {
               onClick={() => setShowScanIssues(true)}
               disabled={!canOpenScanIssues}
               className={`button ${
-                issueCount ? "button-warning" : "button-secondary"
+                scanIssueButtonCount ? "button-warning" : "button-secondary"
               }`}
               title={
-                issueCount
-                  ? `${issueCount.toLocaleString()} paths could not be scanned. Open for details.`
+                scanIssueButtonCount
+                  ? `${issueCount.toLocaleString()} unreadable paths${hasCloudSkipGroup ? " and one cloud-only summary" : ""}. Open for details.`
                   : undefined
               }
             >
               <AlertTriangle size={14} />
               Scan Issues
-              {issueCount ? ` ${issueCount}` : ""}
-              {cloudSkippedCount ? ` · ${cloudSkippedCount} cloud skipped` : ""}
+              {scanIssueButtonCount ? ` ${scanIssueButtonCount}` : ""}
             </button>
           )}
           <button
@@ -2087,7 +2113,7 @@ const Scanning = () => {
           } ${volumeUsage?.totalSpace ? "results-metrics-with-volume" : ""}`}
         >
           <div className="metric">
-            <div className="metric-label">Size</div>
+            <div className="metric-label" title="Logical size of locally present content. Cloud-only placeholders are excluded; sparse files can still exceed allocated size.">Size</div>
             <div className="metric-value tabular-nums">
               {currentNode?.scanSkippedReason ? "—" : formatBytes(currentSize)}
             </div>
@@ -2101,19 +2127,19 @@ const Scanning = () => {
             </div>
           )}
           <div className="metric">
-            <div className="metric-label">Items</div>
+            <div className="metric-label" title="Counts include files and folders below the displayed tree depth.">Items</div>
             <div className="metric-value tabular-nums">
               {currentNode?.scanSkippedReason ? "—" : currentStats.items.toLocaleString()}
             </div>
           </div>
           <div className="metric">
-            <div className="metric-label">Files</div>
+            <div className="metric-label" title="Includes files below the displayed tree depth.">Files</div>
             <div className="metric-value tabular-nums">
               {currentNode?.scanSkippedReason ? "—" : currentStats.files.toLocaleString()}
             </div>
           </div>
           <div className="metric">
-            <div className="metric-label">Folders</div>
+            <div className="metric-label" title="Includes folders below the displayed tree depth.">Folders</div>
             <div className="metric-value tabular-nums">
               {currentNode?.scanSkippedReason ? "—" : currentStats.folders.toLocaleString()}
             </div>
@@ -2443,7 +2469,7 @@ const Scanning = () => {
                           )}
                           {node.scanSkippedReason && (
                             <span className="tree-cloud-skip" title={`${node.scanSkippedReason} Download in Finder and refresh to enumerate contents.`}>
-                              Cloud-only · skipped
+                              Cloud-only · no local data
                             </span>
                           )}
                           {refreshing && (
@@ -2487,7 +2513,7 @@ const Scanning = () => {
         </section>
 
         <section className="data-pane">
-          <div className="pane-title">
+          <div className="pane-title" title="File types include only files individually retained in this tree. Files summarized beyond the display depth are counted above but cannot be broken down by extension.">
             File Types
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
@@ -2936,12 +2962,14 @@ const Scanning = () => {
                   also affect this difference.
                 </p>
               </section>
-              {cloudSkippedCount > 0 && <section>
+              {hasCloudSkipGroup && <section>
                 <h3>Cloud-only content</h3>
                 <p>
-                  {cloudSkippedCount.toLocaleString()} cloud paths were deliberately skipped to avoid automatic downloads.
-                  Download them in Finder and rescan if you want their contents enumerated.
-                  Their remote content is not local disk usage and cannot be assigned a byte share of this difference.
+                  {cloudSkippedFiles.toLocaleString()} cloud-only files have no local content to count.
+                  The scan reads file metadata, not file contents; it did not download these files.
+                  {cloudSkippedFolders > 0 && ` ${cloudSkippedFolders.toLocaleString()} cloud-only folders were not entered.`}
+                  {cloudSkippedUnknown > 0 && ` ${cloudSkippedUnknown.toLocaleString()} paths could not be classified because metadata access was blocked.`}
+                  Their remote bytes are not local disk usage. Make content available offline in its cloud provider and rescan if you want it included.
                 </p>
               </section>}
               <p className="unscanned-disclaimer">
@@ -2963,7 +2991,7 @@ const Scanning = () => {
                   Scan Issues
                 </div>
                 <div className="mt-1 text-xs text-slate-400">
-                  {issueCount || cloudSkippedCount
+                  {scanIssueButtonCount
                     ? formatScanIssueCounts(scanIssueReport.counts)
                     : "No scan issues recorded for this result"}
                 </div>
@@ -2990,11 +3018,7 @@ const Scanning = () => {
                 </button>
               </div>
             </div>
-            <div className="grid grid-cols-5 gap-px border-b border-slate-700 bg-slate-700 text-xs">
-              <div className="bg-[#111827] px-3 py-2">
-                <div className="text-[#7daabf]">Cloud-only skipped</div>
-                <div className="mt-1 font-semibold text-[#9cd7ed]">{cloudSkippedCount.toLocaleString()}</div>
-              </div>
+            <div className="grid grid-cols-4 gap-px border-b border-slate-700 bg-slate-700 text-xs">
               <div className="bg-[#111827] px-3 py-2">
                 <div className="text-slate-500">Not permitted</div>
                 <div className="mt-1 font-semibold text-slate-100">
@@ -3021,7 +3045,7 @@ const Scanning = () => {
               </div>
             </div>
             <div className="min-h-0 flex-1 overflow-auto bg-[#0b1220]">
-              {scanIssueReport.records.length ? (
+              {listedScanIssues.length || hasCloudSkipGroup ? (
                 <table className="w-full border-collapse text-xs">
                   <thead>
                     <tr>
@@ -3031,15 +3055,23 @@ const Scanning = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {scanIssueReport.records.slice(0, 1000).map((record, index) => (
+                    {hasCloudSkipGroup && (
+                      <tr className="bg-[#10202b] text-[#9cd7ed]">
+                        <td className="border-b border-slate-800 px-2 py-2 font-medium">Cloud-only content</td>
+                        <td className="border-b border-slate-800 px-2 py-2" colSpan={2}>
+                          {cloudSkippedFiles.toLocaleString()} files treated as cloud-only (metadata counted, remote content not read)
+                          {cloudSkippedFolders ? ` · ${cloudSkippedFolders.toLocaleString()} folders not entered` : ""}
+                          {cloudSkippedUnknown ? ` · ${cloudSkippedUnknown.toLocaleString()} paths with blocked metadata` : ""}
+                        </td>
+                      </tr>
+                    )}
+                    {listedScanIssues.slice(0, 1000).map((record, index) => (
                       <tr
                         key={`${record.path}-${index}`}
                         className="bg-[#0b1220] hover:bg-[#111827]"
                       >
                         <td className="whitespace-nowrap border-b border-slate-800 px-2 py-1.5 text-slate-200">
-                          {record.kind === "cloudPlaceholder"
-                            ? "Cloud content not downloaded; skipped to avoid automatic download"
-                            : record.reason}
+                          {record.reason}
                         </td>
                         <td className="whitespace-nowrap border-b border-slate-800 px-2 py-1.5 text-slate-300">
                           {record.operation}
@@ -3064,9 +3096,9 @@ const Scanning = () => {
                     : "No scan issues were recorded."}
                 </div>
               )}
-              {scanIssueReport.records.length > 1000 && (
+              {listedScanIssues.length > 1000 && (
                 <p className="p-3 text-xs text-slate-400">
-                  Showing the first 1,000 of {scanIssueReport.records.length.toLocaleString()} recorded paths. Counts above cover the complete report.
+                  Showing the first 1,000 of {listedScanIssues.length.toLocaleString()} recorded paths. Counts above cover the complete report.
                 </p>
               )}
             </div>

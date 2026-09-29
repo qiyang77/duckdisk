@@ -34,7 +34,6 @@ struct Payload {
     permission_denied: u64,
     interrupted: u64,
     other: u64,
-    cloud_skipped: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -54,7 +53,11 @@ struct ScanErrorCounts {
     interrupted: u64,
     other: u64,
     #[serde(default)]
-    cloud_skipped: u64,
+    cloud_skipped_files: u64,
+    #[serde(default)]
+    cloud_skipped_folders: u64,
+    #[serde(default)]
+    cloud_skipped_unknown: u64,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -73,7 +76,7 @@ struct CacheIndex {
     children: Vec<CacheIndexEntry>,
 }
 
-const CACHE_INDEX_VERSION: &str = "duckdisk-cache-index-v6-no-cloud-materialization";
+const CACHE_INDEX_VERSION: &str = "duckdisk-cache-index-v8-complete-file-and-folder-counts";
 const SCAN_CANCELLED_MESSAGE: &str = "Local scan cancelled.";
 
 impl CacheIndex {
@@ -209,7 +212,6 @@ fn emit_scan_status(
                 permission_denied: counts.permission_denied,
                 interrupted: counts.interrupted,
                 other: counts.other,
-                cloud_skipped: counts.cloud_skipped,
             },
         )
         .ok();
@@ -292,7 +294,7 @@ fn increment_scan_count(counts: &mut ScanErrorCounts, kind: &str) {
         "operationNotPermitted" => counts.operation_not_permitted += 1,
         "permissionDenied" => counts.permission_denied += 1,
         "interrupted" => counts.interrupted += 1,
-        "cloudPlaceholder" => counts.cloud_skipped += 1,
+        "cloudPlaceholder" => counts.cloud_skipped_unknown += 1,
         _ => counts.other += 1,
     }
 }
@@ -395,7 +397,7 @@ async fn incremental_scan(
     let cached_report = read_cached_error_report(app_handle, scan_path, ratio)?
         .and_then(|content| serde_json::from_str::<ScanErrorReport>(&content).ok())
         .unwrap_or_default();
-    let error_report = if changed_paths.is_empty() {
+    let mut error_report = if changed_paths.is_empty() {
         merge_scan_error_reports(
             cached_report,
             ScanErrorReport::default(),
@@ -411,6 +413,11 @@ async fn incremental_scan(
     if !removed_paths.is_empty() && changed_paths.is_empty() {
         merge_changed_children(&mut cached_json, scan_path, &removed_paths, &None)?;
     }
+
+    (
+        error_report.counts.cloud_skipped_files,
+        error_report.counts.cloud_skipped_folders,
+    ) = tree_cloud_counts(&cached_json);
 
     let content = serde_json::to_string(&cached_json).map_err(|err| err.to_string())?;
     write_scan_result(&content)
@@ -473,12 +480,16 @@ pub async fn refresh_path(
         let cached_report = read_cached_error_report(app_handle, scan_path, ratio)?
             .and_then(|content| serde_json::from_str::<ScanErrorReport>(&content).ok())
             .unwrap_or_default();
-        let merged_report = merge_scan_error_reports(
+        let mut merged_report = merge_scan_error_reports(
             cached_report,
             refreshed_report,
             &[target_path.to_string()],
             &HashSet::new(),
         );
+        (
+            merged_report.counts.cloud_skipped_files,
+            merged_report.counts.cloud_skipped_folders,
+        ) = tree_cloud_counts(&cached_json);
         let report = serde_json::to_string(&merged_report).map_err(|err| err.to_string())?;
         write_cached_error_report(app_handle, scan_path, ratio, &report)?;
     }
@@ -574,14 +585,30 @@ async fn run_pdu_for_paths(
         return Err("Local scanner produced no result".into());
     }
 
-    let error_report = build_error_report(error_records);
+    let mut error_report = build_error_report(error_records);
     let mut parsed = stdout
         .map(|content| parse_pdu_content(&content))
         .transpose()?;
     if let Some(parsed) = parsed.as_mut() {
+        (
+            error_report.counts.cloud_skipped_files,
+            error_report.counts.cloud_skipped_folders,
+        ) = tree_cloud_counts(parsed);
         annotate_cloud_skips(parsed, &error_report);
     }
     Ok((parsed, error_report))
+}
+
+fn tree_cloud_counts(parsed: &Value) -> (u64, u64) {
+    let tree = parsed.get("tree");
+    (
+        tree.and_then(|node| node.get("cloudSkippedFiles"))
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        tree.and_then(|node| node.get("cloudSkippedFolders"))
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+    )
 }
 
 fn parse_pdu_content(content: &str) -> Result<Value, String> {
@@ -630,6 +657,14 @@ fn annotate_cloud_skips(parsed: &mut Value, report: &ScanErrorReport) {
 }
 
 fn normalize_pdu_tree(node: &mut Value) -> Result<(), String> {
+    if node.get("cloudPlaceholder").and_then(Value::as_bool) == Some(true) {
+        node["scanSkippedReason"] = Value::from(
+            "Cloud-only content is not stored locally; its remote size is excluded from this scan.",
+        );
+    }
+    if let Some(object) = node.as_object_mut() {
+        object.remove("cloudPlaceholder");
+    }
     let size = node
         .get("size")
         .and_then(Value::as_object)
@@ -675,7 +710,14 @@ fn replace_cached_subtree(
             node_path.join(name)
         };
 
-        let before = (tree_size(child), tree_allocated_size(child));
+        let before = (
+            tree_size(child),
+            tree_allocated_size(child),
+            tree_cloud_files(child),
+            tree_cloud_folders(child),
+            tree_total_files(child),
+            tree_total_folders(child),
+        );
         let replaced = if child_path == target_path {
             let preserved_name = child["name"].clone();
             *child = refreshed_tree.clone();
@@ -686,7 +728,17 @@ fn replace_cached_subtree(
                 && replace_cached_subtree(child, &child_path, target_path, refreshed_tree)
         };
         if replaced {
-            replaced_sizes = Some((before, (tree_size(child), tree_allocated_size(child))));
+            replaced_sizes = Some((
+                before,
+                (
+                    tree_size(child),
+                    tree_allocated_size(child),
+                    tree_cloud_files(child),
+                    tree_cloud_folders(child),
+                    tree_total_files(child),
+                    tree_total_folders(child),
+                ),
+            ));
             break;
         }
     }
@@ -706,12 +758,36 @@ fn adjusted_tree_total(total: u64, before: u64, after: u64) -> u64 {
     }
 }
 
-fn adjust_node_totals(node: &mut Value, before: (u64, u64), after: (u64, u64)) {
+fn adjust_node_totals(
+    node: &mut Value,
+    before: (u64, u64, u64, u64, u64, u64),
+    after: (u64, u64, u64, u64, u64, u64),
+) {
     node["size"] = Value::from(adjusted_tree_total(tree_size(node), before.0, after.0));
     node["allocatedSize"] = Value::from(adjusted_tree_total(
         tree_allocated_size(node),
         before.1,
         after.1,
+    ));
+    node["cloudSkippedFiles"] = Value::from(adjusted_tree_total(
+        tree_cloud_files(node),
+        before.2,
+        after.2,
+    ));
+    node["cloudSkippedFolders"] = Value::from(adjusted_tree_total(
+        tree_cloud_folders(node),
+        before.3,
+        after.3,
+    ));
+    node["totalFiles"] = Value::from(adjusted_tree_total(
+        tree_total_files(node),
+        before.4,
+        after.4,
+    ));
+    node["totalFolders"] = Value::from(adjusted_tree_total(
+        tree_total_folders(node),
+        before.5,
+        after.5,
     ));
 }
 
@@ -730,7 +806,14 @@ fn merge_changed_children(
         .unwrap_or_default()
         .to_string();
     let total_root = root_name == "(total)";
-    let totals_before = (tree_size(root), tree_allocated_size(root));
+    let totals_before = (
+        tree_size(root),
+        tree_allocated_size(root),
+        tree_cloud_files(root),
+        tree_cloud_folders(root),
+        tree_total_files(root),
+        tree_total_folders(root),
+    );
     let children = root
         .get_mut("children")
         .and_then(Value::as_array_mut)
@@ -738,6 +821,10 @@ fn merge_changed_children(
     let children_before = (
         children.iter().map(tree_size).sum::<u64>(),
         children.iter().map(tree_allocated_size).sum::<u64>(),
+        children.iter().map(tree_cloud_files).sum::<u64>(),
+        children.iter().map(tree_cloud_folders).sum::<u64>(),
+        children.iter().map(tree_total_files).sum::<u64>(),
+        children.iter().map(tree_total_folders).sum::<u64>(),
     );
 
     children.retain(|child| {
@@ -777,6 +864,10 @@ fn merge_changed_children(
 
     let size = children.iter().map(tree_size).sum::<u64>();
     let allocated_size = children.iter().map(tree_allocated_size).sum::<u64>();
+    let cloud_files = children.iter().map(tree_cloud_files).sum::<u64>();
+    let cloud_folders = children.iter().map(tree_cloud_folders).sum::<u64>();
+    let total_files = children.iter().map(tree_total_files).sum::<u64>();
+    let total_folders = children.iter().map(tree_total_folders).sum::<u64>();
     root["size"] = Value::from(adjusted_tree_total(
         totals_before.0,
         children_before.0,
@@ -786,6 +877,26 @@ fn merge_changed_children(
         totals_before.1,
         children_before.1,
         allocated_size,
+    ));
+    root["cloudSkippedFiles"] = Value::from(adjusted_tree_total(
+        totals_before.2,
+        children_before.2,
+        cloud_files,
+    ));
+    root["cloudSkippedFolders"] = Value::from(adjusted_tree_total(
+        totals_before.3,
+        children_before.3,
+        cloud_folders,
+    ));
+    root["totalFiles"] = Value::from(adjusted_tree_total(
+        totals_before.4,
+        children_before.4,
+        total_files,
+    ));
+    root["totalFolders"] = Value::from(adjusted_tree_total(
+        totals_before.5,
+        children_before.5,
+        total_folders,
     ));
     Ok(())
 }
@@ -813,6 +924,30 @@ fn tree_allocated_size(node: &Value) -> u64 {
     node.get("allocatedSize")
         .and_then(Value::as_u64)
         .unwrap_or_else(|| tree_size(node))
+}
+
+fn tree_cloud_files(node: &Value) -> u64 {
+    node.get("cloudSkippedFiles")
+        .and_then(Value::as_u64)
+        .unwrap_or_default()
+}
+
+fn tree_cloud_folders(node: &Value) -> u64 {
+    node.get("cloudSkippedFolders")
+        .and_then(Value::as_u64)
+        .unwrap_or_default()
+}
+
+fn tree_total_files(node: &Value) -> u64 {
+    node.get("totalFiles")
+        .and_then(Value::as_u64)
+        .unwrap_or_default()
+}
+
+fn tree_total_folders(node: &Value) -> u64 {
+    node.get("totalFolders")
+        .and_then(Value::as_u64)
+        .unwrap_or_default()
 }
 
 fn child_path(scan_path: &str, total_root: bool, child: &Value) -> Option<String> {
@@ -1185,7 +1320,8 @@ mod tests {
                 kind: classify_scan_error("Resource deadlock avoided (os error 11)").into(),
             },
         ]);
-        assert_eq!(report.counts.cloud_skipped, 2);
+        assert_eq!(report.counts.cloud_skipped_unknown, 2);
+        assert_eq!(report.counts.cloud_skipped_files, 0);
         assert_eq!(report.counts.other, 0);
         let mut parsed = json!({"tree": {"name": "(total)", "children": [
             {"name": "/Users", "children": [{"name": "test", "children": [
@@ -1207,7 +1343,9 @@ mod tests {
             "permissionDenied": 1, "operationNotPermitted": 2, "interrupted": 3, "other": 4
         }))
         .unwrap();
-        assert_eq!(counts.cloud_skipped, 0);
+        assert_eq!(counts.cloud_skipped_files, 0);
+        assert_eq!(counts.cloud_skipped_folders, 0);
+        assert_eq!(counts.cloud_skipped_unknown, 0);
         assert_eq!(counts.permission_denied, 1);
     }
 
@@ -1275,6 +1413,10 @@ mod tests {
         };
 
         assert!(!index.matches_scan("/", "0"));
+        index.version = "duckdisk-cache-index-v6-no-cloud-materialization".to_string();
+        assert!(!index.matches_scan("/", "0"));
+        index.version = "duckdisk-cache-index-v7-cloud-counts-and-local-logical-size".to_string();
+        assert!(!index.matches_scan("/", "0"));
         index.version = CACHE_INDEX_VERSION.to_string();
         assert!(index.matches_scan("/", "0"));
         assert!(!index.matches_scan("/Users", "0"));
@@ -1286,20 +1428,35 @@ mod tests {
             "name": "(total)",
             "size": 15,
             "allocatedSize": 24,
+            "cloudSkippedFiles": 5,
+            "cloudSkippedFolders": 1,
+            "totalFiles": 7,
+            "totalFolders": 4,
             "children": [{
                 "name": "/Users",
                 "size": 10,
                 "allocatedSize": 16,
+                "cloudSkippedFiles": 4,
+                "cloudSkippedFolders": 1,
+                "totalFiles": 5,
+                "totalFolders": 2,
                 "children": [{
                     "name": "qi",
                     "size": 10,
                     "allocatedSize": 16,
+                    "cloudSkippedFiles": 4,
+                    "cloudSkippedFolders": 1,
+                    "totalFiles": 5,
+                    "totalFolders": 1,
                     "children": []
                 }]
             }, {
                 "name": "/Applications",
                 "size": 5,
                 "allocatedSize": 8,
+                "cloudSkippedFiles": 1,
+                "totalFiles": 2,
+                "totalFolders": 1,
                 "children": []
             }]
         });
@@ -1307,6 +1464,9 @@ mod tests {
             "name": "/Users/qi",
             "size": 30,
             "allocatedSize": 40,
+            "cloudSkippedFiles": 6,
+            "totalFiles": 8,
+            "totalFolders": 1,
             "children": []
         });
 
@@ -1319,6 +1479,10 @@ mod tests {
         assert_eq!(root["children"][0]["children"][0]["name"], "qi");
         assert_eq!(root["size"], 35);
         assert_eq!(root["allocatedSize"], 48);
+        assert_eq!(root["cloudSkippedFiles"], 7);
+        assert_eq!(root["cloudSkippedFolders"], 0);
+        assert_eq!(root["totalFiles"], 10);
+        assert_eq!(root["totalFolders"], 4);
     }
 
     #[test]
@@ -1342,15 +1506,56 @@ mod tests {
     }
 
     #[test]
+    fn preserves_aggregate_cloud_counts_and_marks_visible_placeholders() {
+        let content = json!({
+            "unit": "dual-bytes",
+            "tree": {
+                "name": "/Users/test/cloud",
+                "size": {"allocated": 4096, "apparent": 5},
+                "isDirectory": true,
+                "cloudSkippedFiles": 10,
+                "cloudSkippedFolders": 1,
+                "totalFiles": 20,
+                "totalFolders": 2,
+                "children": [{
+                    "name": "remote.bin",
+                    "size": {"allocated": 0, "apparent": 0},
+                    "isDirectory": false,
+                    "cloudPlaceholder": true,
+                    "cloudSkippedFiles": 1,
+                    "totalFiles": 1,
+                    "children": []
+                }]
+            }
+        })
+        .to_string();
+        let parsed = parse_pdu_content(&content).unwrap();
+        assert_eq!(tree_cloud_counts(&parsed), (10, 1));
+        assert_eq!(parsed["tree"]["totalFiles"], 20);
+        assert_eq!(parsed["tree"]["totalFolders"], 2);
+        assert!(parsed["tree"]["children"][0]["scanSkippedReason"]
+            .as_str()
+            .unwrap()
+            .contains("not stored locally"));
+        assert!(parsed["tree"]["children"][0]
+            .get("cloudPlaceholder")
+            .is_none());
+        assert_eq!(build_error_report(Vec::new()).records.len(), 0);
+    }
+
+    #[test]
     fn subtree_refresh_preserves_parent_deduplication() {
         let mut root = json!({
             "name": "(total)", "size": 16, "allocatedSize": 16,
+            "cloudSkippedFiles": 5,
+            "totalFiles": 5,
+            "totalFolders": 3,
             "children": [
-                {"name": "/a", "size": 10, "allocatedSize": 10},
-                {"name": "/b", "size": 10, "allocatedSize": 10}
+                {"name": "/a", "size": 10, "allocatedSize": 10, "cloudSkippedFiles": 4, "totalFiles": 4, "totalFolders": 1},
+                {"name": "/b", "size": 10, "allocatedSize": 10, "cloudSkippedFiles": 1, "totalFiles": 1, "totalFolders": 1}
             ]
         });
-        let refreshed = json!({"name": "/a", "size": 15, "allocatedSize": 15});
+        let refreshed = json!({"name": "/a", "size": 15, "allocatedSize": 15, "cloudSkippedFiles": 8, "totalFiles": 8, "totalFolders": 2});
         assert!(replace_cached_subtree(
             &mut root,
             Path::new("/"),
@@ -1359,20 +1564,31 @@ mod tests {
         ));
         assert_eq!(root["allocatedSize"], 21);
         assert_eq!(root["size"], 21);
+        assert_eq!(root["cloudSkippedFiles"], 9);
+        assert_eq!(root["totalFiles"], 9);
+        assert_eq!(root["totalFolders"], 4);
     }
 
     #[test]
     fn incremental_merge_preserves_parent_deduplication() {
         let mut cached = json!({"tree": {
             "name": "(total)", "size": 16, "allocatedSize": 16,
+            "cloudSkippedFiles": 5,
+            "totalFiles": 5,
+            "totalFolders": 3,
             "children": [
-                {"name": "/a", "size": 10, "allocatedSize": 10},
-                {"name": "/b", "size": 10, "allocatedSize": 10}
+                {"name": "/a", "size": 10, "allocatedSize": 10, "cloudSkippedFiles": 4, "totalFiles": 4, "totalFolders": 1},
+                {"name": "/b", "size": 10, "allocatedSize": 10, "cloudSkippedFiles": 1, "totalFiles": 1, "totalFolders": 1}
             ]
         }});
-        let changed = Some(json!({"tree": {"name": "/a", "size": 15, "allocatedSize": 15}}));
+        let changed = Some(
+            json!({"tree": {"name": "/a", "size": 15, "allocatedSize": 15, "cloudSkippedFiles": 8, "totalFiles": 8, "totalFolders": 2}}),
+        );
         merge_changed_children(&mut cached, "/", &HashSet::new(), &changed).unwrap();
         assert_eq!(cached["tree"]["allocatedSize"], 21);
         assert_eq!(cached["tree"]["size"], 21);
+        assert_eq!(cached["tree"]["cloudSkippedFiles"], 9);
+        assert_eq!(cached["tree"]["totalFiles"], 9);
+        assert_eq!(cached["tree"]["totalFolders"], 4);
     }
 }

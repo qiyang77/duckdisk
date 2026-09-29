@@ -97,59 +97,253 @@ index a51225d..6305cd9 100644
 +    #[cfg(unix)]
 +    DualSize,
 diff --git a/src/data_tree.rs b/src/data_tree.rs
-index 6c68ff6..542c28b 100644
+index 6c68ff6..49ed9fa 100644
 --- a/src/data_tree.rs
 +++ b/src/data_tree.rs
-@@ -27,0 +28 @@ pub struct DataTree<Name, Size: size::Size> {
+@@ -27,0 +28,6 @@ pub struct DataTree<Name, Size: size::Size> {
 +    is_directory: bool,
++    cloud_placeholder: bool,
++    cloud_skipped_files: u64,
++    cloud_skipped_folders: u64,
++    total_files: u64,
++    total_folders: u64,
 diff --git a/src/data_tree/constructors.rs b/src/data_tree/constructors.rs
-index 3b95367..491408a 100644
+index 3b95367..248bcf5 100644
 --- a/src/data_tree/constructors.rs
 +++ b/src/data_tree/constructors.rs
-@@ -11,0 +12 @@ impl<Name, Size: size::Size> DataTree<Name, Size> {
+@@ -11,0 +12,12 @@ impl<Name, Size: size::Size> DataTree<Name, Size> {
 +            is_directory: true,
-@@ -21,0 +23 @@ impl<Name, Size: size::Size> DataTree<Name, Size> {
++            cloud_placeholder: false,
++            cloud_skipped_files: children.iter().map(|child| child.cloud_skipped_files).sum(),
++            cloud_skipped_folders: children
++                .iter()
++                .map(|child| child.cloud_skipped_folders)
++                .sum(),
++            total_files: children.iter().map(|child| child.total_files).sum(),
++            total_folders: 1 + children
++                .iter()
++                .map(|child| child.total_folders)
++                .sum::<u64>(),
+@@ -21,0 +34,6 @@ impl<Name, Size: size::Size> DataTree<Name, Size> {
 +            is_directory: false,
++            cloud_placeholder: false,
++            cloud_skipped_files: 0,
++            cloud_skipped_folders: 0,
++            total_files: 1,
++            total_folders: 0,
+@@ -25,0 +44,36 @@ impl<Name, Size: size::Size> DataTree<Name, Size> {
++    /// Keep totals even when the caller deliberately truncates displayed children.
++    #[inline]
++    pub fn collapsed_dir(
++        name: Name,
++        size: Size,
++        cloud_files: u64,
++        cloud_folders: u64,
++        total_files: u64,
++        total_folders: u64,
++    ) -> Self {
++        DataTree {
++            name,
++            size,
++            is_directory: true,
++            cloud_placeholder: false,
++            cloud_skipped_files: cloud_files,
++            cloud_skipped_folders: cloud_folders,
++            total_files,
++            total_folders: total_folders + 1,
++            children: Vec::new(),
++        }
++    }
++
++    #[inline]
++    pub fn with_cloud_placeholder(mut self, cloud_placeholder: bool) -> Self {
++        self.cloud_placeholder = cloud_placeholder;
++        if cloud_placeholder {
++            if self.is_directory {
++                self.cloud_skipped_folders += 1;
++            } else {
++                self.cloud_skipped_files += 1;
++            }
++        }
++        self
++    }
++
+diff --git a/src/data_tree/getters.rs b/src/data_tree/getters.rs
+index cfedad1..7fe31a2 100644
+--- a/src/data_tree/getters.rs
++++ b/src/data_tree/getters.rs
+@@ -22,0 +23,12 @@ impl<Name, Size: size::Size> DataTree<Name, Size> {
++    /// Files and folders excluded from local size accounting in this subtree.
++    #[inline]
++    pub fn cloud_skipped_counts(&self) -> (u64, u64) {
++        (self.cloud_skipped_files, self.cloud_skipped_folders)
++    }
++
++    /// File and folder counts before display-depth truncation or ratio culling.
++    #[inline]
++    pub fn total_counts(&self) -> (u64, u64) {
++        (self.total_files, self.total_folders)
++    }
++
 diff --git a/src/data_tree/reflection.rs b/src/data_tree/reflection.rs
-index 8288b4b..dcd8d09 100644
+index 8288b4b..db6ed25 100644
 --- a/src/data_tree/reflection.rs
 +++ b/src/data_tree/reflection.rs
-@@ -37,0 +38,3 @@ pub struct Reflection<Name, Size: size::Size> {
+@@ -11,0 +12,9 @@ use serde::{Deserialize, Serialize};
++#[cfg(feature = "json")]
++fn skip_false(value: &bool) -> bool {
++    !*value
++}
++#[cfg(feature = "json")]
++fn skip_zero(value: &u64) -> bool {
++    *value == 0
++}
++
+@@ -37,0 +47,40 @@ pub struct Reflection<Name, Size: size::Size> {
 +    /// Whether this filesystem node is a directory, including empty and truncated directories.
 +    #[cfg_attr(feature = "json", serde(rename = "isDirectory", default))]
 +    pub is_directory: bool,
++    #[cfg_attr(
++        feature = "json",
++        serde(
++            rename = "cloudPlaceholder",
++            default,
++            skip_serializing_if = "skip_false"
++        )
++    )]
++    pub cloud_placeholder: bool,
++    #[cfg_attr(
++        feature = "json",
++        serde(
++            rename = "cloudSkippedFiles",
++            default,
++            skip_serializing_if = "skip_zero"
++        )
++    )]
++    pub cloud_skipped_files: u64,
++    #[cfg_attr(
++        feature = "json",
++        serde(
++            rename = "cloudSkippedFolders",
++            default,
++            skip_serializing_if = "skip_zero"
++        )
++    )]
++    pub cloud_skipped_folders: u64,
++    #[cfg_attr(
++        feature = "json",
++        serde(rename = "totalFiles", default, skip_serializing_if = "skip_zero")
++    )]
++    pub total_files: u64,
++    #[cfg_attr(
++        feature = "json",
++        serde(rename = "totalFolders", default, skip_serializing_if = "skip_zero")
++    )]
++    pub total_folders: u64,
 diff --git a/src/data_tree/reflection/convert.rs b/src/data_tree/reflection/convert.rs
-index ff36080..a6b19e7 100644
+index ff36080..d898703 100644
 --- a/src/data_tree/reflection/convert.rs
 +++ b/src/data_tree/reflection/convert.rs
-@@ -8,0 +9 @@ impl<Name, Size: size::Size> From<DataTree<Name, Size>> for Reflection<Name, Siz
+@@ -8,0 +9,6 @@ impl<Name, Size: size::Size> From<DataTree<Name, Size>> for Reflection<Name, Siz
 +            is_directory,
-@@ -14,0 +16 @@ impl<Name, Size: size::Size> From<DataTree<Name, Size>> for Reflection<Name, Siz
++            cloud_placeholder,
++            cloud_skipped_files,
++            cloud_skipped_folders,
++            total_files,
++            total_folders,
+@@ -14,0 +21,6 @@ impl<Name, Size: size::Size> From<DataTree<Name, Size>> for Reflection<Name, Siz
 +            is_directory,
++            cloud_placeholder,
++            cloud_skipped_files,
++            cloud_skipped_folders,
++            total_files,
++            total_folders,
 diff --git a/src/data_tree/reflection/par_methods.rs b/src/data_tree/reflection/par_methods.rs
-index 786c1da..76f5f37 100644
+index 786c1da..35587b4 100644
 --- a/src/data_tree/reflection/par_methods.rs
 +++ b/src/data_tree/reflection/par_methods.rs
-@@ -15,0 +16 @@ where
+@@ -15,0 +16,6 @@ where
 +            is_directory,
-@@ -44,0 +46 @@ where
++            cloud_placeholder,
++            cloud_skipped_files,
++            cloud_skipped_folders,
++            total_files,
++            total_folders,
+@@ -44,0 +51,6 @@ where
 +            is_directory,
-@@ -62,0 +65 @@ where
++            cloud_placeholder,
++            cloud_skipped_files,
++            cloud_skipped_folders,
++            total_files,
++            total_folders,
+@@ -62,0 +75,6 @@ where
 +            is_directory,
-@@ -72,0 +76 @@ where
++            cloud_placeholder,
++            cloud_skipped_files,
++            cloud_skipped_folders,
++            total_files,
++            total_folders,
+@@ -72,0 +91,6 @@ where
 +            is_directory,
++            cloud_placeholder,
++            cloud_skipped_files,
++            cloud_skipped_folders,
++            total_files,
++            total_folders,
 diff --git a/src/data_tree/retain/test.rs b/src/data_tree/retain/test.rs
-index 2c8e7fe..98d954c 100644
+index 2c8e7fe..e6cc837 100644
 --- a/src/data_tree/retain/test.rs
 +++ b/src/data_tree/retain/test.rs
-@@ -105 +105 @@ fn typical_case() {
+@@ -8,0 +9,13 @@ type SampleTree = DataTree<SampleName, SampleData>;
++fn without_aggregate_counts(
++    mut node: crate::data_tree::Reflection<SampleName, SampleData>,
++) -> crate::data_tree::Reflection<SampleName, SampleData> {
++    node.total_files = 0;
++    node.total_folders = 0;
++    node.children = node
++        .children
++        .into_iter()
++        .map(without_aggregate_counts)
++        .collect();
++    node
++}
++
+@@ -105 +118 @@ fn typical_case() {
 -            file("directory of multiple small files", 4069 + 11 * 4321),
 +            culled_dir("directory of multiple small files", 11 * 4321, vec![]),
-@@ -169 +169 @@ fn edge_cases() {
+@@ -110 +123,5 @@ fn typical_case() {
+-    assert_eq!(actual, expected);
++    assert_eq!((actual.total_files, actual.total_folders), (30, 7));
++    assert_eq!(
++        without_aggregate_counts(actual),
++        without_aggregate_counts(expected)
++    );
+@@ -169 +186 @@ fn edge_cases() {
 -            file("reduce all", 4069 + 123 + 456 + 789),
 +            culled_dir("reduce all", 123 + 456 + 789, vec![]),
+@@ -187 +204,19 @@ fn edge_cases() {
+-    assert_eq!(actual, expected);
++    assert_eq!((actual.total_files, actual.total_folders), (20, 6));
++    assert_eq!(
++        without_aggregate_counts(actual),
++        without_aggregate_counts(expected)
++    );
++}
++
++#[test]
++fn preserves_counts_when_descendants_are_hidden() {
++    let tree = dir::<0>(
++        "root",
++        vec![
++            dir::<0>("hidden", vec![file("a", 3), file("b", 5)]),
++            file("visible", 1000),
++        ],
++    );
++    let pruned = tree.into_par_retained(|node, _| node.name() != "hidden");
++    assert_eq!(pruned.total_counts(), (3, 2));
++    assert_eq!(pruned.children().len(), 1);
 diff --git a/src/fs_tree_builder.rs b/src/fs_tree_builder.rs
-index 21b0902..4d6ca6d 100644
+index 21b0902..2f11fd5 100644
 --- a/src/fs_tree_builder.rs
 +++ b/src/fs_tree_builder.rs
 @@ -7 +7 @@ use super::{
@@ -176,66 +370,156 @@ index 21b0902..4d6ca6d 100644
 +        assert!(!is_dataless_directory(true, 0));
 +    }
 +}
-@@ -108 +127 @@ where
+@@ -108,27 +127,41 @@ where
 -                let (is_dir, size, same_device) = match symlink_metadata(path) {
-+                let (is_dir, size, same_device, is_dataless) = match symlink_metadata(path) {
-@@ -116,0 +136 @@ where
-+                            is_directory: false,
-@@ -122,0 +143,14 @@ where
-+                        // A cloud placeholder directory may block in getdirentries64
-+                        // while macOS fetches it. Keep the node, but do not enter it.
-+                        #[cfg(target_os = "macos")]
-+                        let is_dataless = is_dataless_directory(is_dir, stats.st_flags());
-+                        #[cfg(target_os = "macos")]
-+                        if stats.st_flags() & 0x4000_0000 != 0 {
+-                    Err(error) => {
+-                        reporter.report(Event::EncounterError(ErrorReport {
+-                            operation: SymlinkMetadata,
+-                            path,
+-                            error,
+-                        }));
+-                        return Info {
+-                            size: Size::default(),
+-                            children: Vec::new(),
+-                        };
+-                    }
+-                    Ok(stats) => {
+-                        // `stats` should be dropped ASAP to avoid piling up kernel memory usage
+-                        let is_dir = stats.is_dir();
+-                        let same_device =
+-                            root_dev.is_none_or(|root_dev| get_device_id(&stats) == root_dev);
+-                        let size = size_getter.get_size(&stats);
+-                        reporter.report(Event::ReceiveData(size));
+-                        hardlinks_recorder
+-                            .record_hardlinks(RecordHardlinksArgument::new(
+-                                path, &stats, size, reporter,
+-                            ))
+-                            .ok(); // ignore the error for now
+-                        (is_dir, size, same_device)
+-                    }
+-                };
++                let (is_dir, size, same_device, is_dataless, cloud_placeholder) =
++                    match symlink_metadata(path) {
++                        Err(error) => {
 +                            reporter.report(Event::EncounterError(ErrorReport {
 +                                operation: SymlinkMetadata,
 +                                path,
-+                                error: std::io::Error::other("DuckDisk cloud placeholder skipped: automatic download disabled"),
++                                error,
 +                            }));
++                            return Info {
++                                size: Size::default(),
++                                is_directory: false,
++                                cloud_placeholder: false,
++                                children: Vec::new(),
++                            };
 +                        }
-+                        #[cfg(not(target_os = "macos"))]
-+                        let is_dataless = false;
-@@ -132 +166 @@ where
--                        (is_dir, size, same_device)
-+                        (is_dir, size, same_device, is_dataless)
-@@ -136 +170 @@ where
++                        Ok(stats) => {
++                            // `stats` should be dropped ASAP to avoid piling up kernel memory usage
++                            let is_dir = stats.is_dir();
++                            // A cloud placeholder directory may block in getdirentries64
++                            // while macOS fetches it. Keep the node, but do not enter it.
++                            #[cfg(target_os = "macos")]
++                            let is_dataless = is_dataless_directory(is_dir, stats.st_flags());
++                            #[cfg(target_os = "macos")]
++                            let cloud_placeholder = stats.st_flags() & 0x4000_0000 != 0
++                                || crate::get_size::is_onedrive_remote_placeholder(&stats, path);
++                            #[cfg(not(target_os = "macos"))]
++                            let is_dataless = false;
++                            #[cfg(not(target_os = "macos"))]
++                            let cloud_placeholder = false;
++                            let same_device =
++                                root_dev.is_none_or(|root_dev| get_device_id(&stats) == root_dev);
++                            let size = size_getter.get_size(&stats, path);
++                            reporter.report(Event::ReceiveData(size));
++                            hardlinks_recorder
++                                .record_hardlinks(RecordHardlinksArgument::new(
++                                    path, &stats, size, reporter,
++                                ))
++                                .ok(); // ignore the error for now
++                            (is_dir, size, same_device, is_dataless, cloud_placeholder)
++                        }
++                    };
+@@ -136 +169 @@ where
 -                let children: Vec<_> = if is_dir && same_device {
 +                let children: Vec<_> = if is_dir && same_device && !is_dataless {
-@@ -145,0 +180 @@ where
+@@ -138,0 +172 @@ where
++                            let materialization_blocked = error.raw_os_error() == Some(11);
+@@ -145,0 +180,2 @@ where
 +                                is_directory: true,
-@@ -167 +202,5 @@ where
++                                cloud_placeholder: cloud_placeholder || materialization_blocked,
+@@ -167 +203,6 @@ where
 -                Info { size, children }
 +                Info {
 +                    size,
 +                    is_directory: is_dir,
++                    cloud_placeholder,
 +                    children,
 +                }
 diff --git a/src/get_size.rs b/src/get_size.rs
-index 235fef8..746d45d 100644
+index 235fef8..eb72753 100644
 --- a/src/get_size.rs
 +++ b/src/get_size.rs
-@@ -5 +5,3 @@ use std::fs::Metadata;
+@@ -2,0 +3 @@ use std::fs::Metadata;
++use std::path::Path;
+@@ -5 +6,3 @@ use std::fs::Metadata;
 -use super::size::Blocks;
 +use super::size::{Blocks, DualBytes};
 +#[cfg(target_os = "macos")]
 +use std::os::macos::fs::MetadataExt as MacMetadataExt;
-@@ -38,0 +41,50 @@ impl GetSize for GetBlockSize {
+@@ -12 +15 @@ pub trait GetSize {
+-    fn get_size(&self, metadata: &Metadata) -> Self::Size;
++    fn get_size(&self, metadata: &Metadata, path: &Path) -> Self::Size;
+@@ -21 +24 @@ impl GetSize for GetApparentSize {
+-    fn get_size(&self, metadata: &Metadata) -> Self::Size {
++    fn get_size(&self, metadata: &Metadata, _path: &Path) -> Self::Size {
+@@ -34 +37 @@ impl GetSize for GetBlockSize {
+-    fn get_size(&self, metadata: &Metadata) -> Self::Size {
++    fn get_size(&self, metadata: &Metadata, _path: &Path) -> Self::Size {
+@@ -38,0 +42,125 @@ impl GetSize for GetBlockSize {
 +/// Returns both apparent and allocated byte counts from one metadata lookup.
 +#[cfg(unix)]
 +#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 +pub struct GetDualSize;
++
++/// OneDrive's private sync mirror can hold remote-only files with a logical
++/// length but no allocated blocks and without SF_DATALESS. This is narrower
++/// than treating every zero-block sparse file as a cloud placeholder.
++#[cfg(target_os = "macos")]
++pub(crate) fn is_onedrive_remote_placeholder(metadata: &Metadata, path: &Path) -> bool {
++    use std::ffi::OsStr;
++    metadata.is_file()
++        && metadata.blocks() == 0
++        && metadata.len() > 0
++        // Only the observed private cache layout is eligible. Merely having
++        // both names anywhere in a path could hide a user's ordinary sparse file.
++        && path
++            .components()
++            .map(|component| component.as_os_str())
++            .collect::<Vec<_>>()
++            .windows(4)
++            .any(|part| {
++                part == [
++                    OsStr::new("Group Containers"),
++                    OsStr::new("UBF8T346G9.OneDriveSyncClientSuite"),
++                    OsStr::new("OneDrive.noindex"),
++                    OsStr::new("OneDrive"),
++                ]
++            })
++}
++
 +#[cfg(unix)]
 +impl GetSize for GetDualSize {
 +    type Size = DualBytes;
 +
 +    #[inline]
-+    fn get_size(&self, metadata: &Metadata) -> Self::Size {
++    fn get_size(&self, metadata: &Metadata, path: &Path) -> Self::Size {
 +        let allocated = metadata.blocks() * 512;
 +        #[cfg(target_os = "macos")]
 +        const SF_DATALESS: u32 = 0x4000_0000;
 +        #[cfg(target_os = "macos")]
-+        let apparent = if metadata.st_flags() & SF_DATALESS != 0 {
++        let apparent = if metadata.st_flags() & SF_DATALESS != 0
++            || is_onedrive_remote_placeholder(metadata, path)
++        {
 +            0
 +        } else {
 +            metadata.len()
@@ -264,13 +548,62 @@ index 235fef8..746d45d 100644
 +            .unwrap();
 +        file.set_len(64 * 1024 * 1024).unwrap();
 +        let metadata = file.metadata().unwrap();
-+        let size = GetDualSize.get_size(&metadata);
++        let size = GetDualSize.get_size(&metadata, &path);
 +        std::fs::remove_file(path).unwrap();
 +        assert_eq!(size.apparent, 64 * 1024 * 1024);
 +        assert_eq!(size.allocated, 0);
 +    }
++
++    #[test]
++    fn excludes_remote_only_onedrive_mirror_without_hiding_other_sparse_files() {
++        let base = std::env::temp_dir().join(format!(
++            "duckdisk-onedrive-size-test-{}",
++            std::process::id()
++        ));
++        let mirror = base
++            .join("Group Containers/UBF8T346G9.OneDriveSyncClientSuite/OneDrive.noindex/OneDrive");
++        std::fs::create_dir_all(&mirror).unwrap();
++        let path = mirror.join("remote-only.bin");
++        let file = std::fs::OpenOptions::new()
++            .write(true)
++            .create_new(true)
++            .open(&path)
++            .unwrap();
++        file.set_len(64 * 1024 * 1024).unwrap();
++        let metadata = file.metadata().unwrap();
++        let size = GetDualSize.get_size(&metadata, &path);
++        assert_eq!((size.apparent, size.allocated), (0, 0));
++        std::fs::remove_file(path).unwrap();
++        std::fs::remove_dir_all(base).unwrap();
++    }
++
++    #[test]
++    fn onedrive_name_fragments_elsewhere_do_not_hide_sparse_files() {
++        let base = std::env::temp_dir().join(format!(
++            "duckdisk-onedrive-path-test-{}",
++            std::process::id()
++        ));
++        let unrelated = base.join("Group Containers/UBF8T346G9.OneDriveSyncClientSuite/unrelated/OneDrive.noindex/OneDrive");
++        std::fs::create_dir_all(&unrelated).unwrap();
++        let path = unrelated.join("sparse.bin");
++        let file = std::fs::OpenOptions::new()
++            .write(true)
++            .create_new(true)
++            .open(&path)
++            .unwrap();
++        file.set_len(64 * 1024 * 1024).unwrap();
++        let metadata = file.metadata().unwrap();
++        assert_eq!(
++            GetDualSize.get_size(&metadata, &path).apparent,
++            64 * 1024 * 1024
++        );
++        std::fs::remove_dir_all(base).unwrap();
++    }
 +}
 +
+@@ -47 +175 @@ impl GetSize for GetBlockCount {
+-    fn get_size(&self, metadata: &Metadata) -> Self::Size {
++    fn get_size(&self, metadata: &Metadata, _path: &Path) -> Self::Size {
 diff --git a/src/json_data.rs b/src/json_data.rs
 index eed2b09..7135b65 100644
 --- a/src/json_data.rs
@@ -370,25 +703,132 @@ index 34224b8..89f9a73 100644
 +    }
 +}
 diff --git a/src/tree_builder.rs b/src/tree_builder.rs
-index 5f82572..327bf03 100644
+index 5f82572..60b41a1 100644
 --- a/src/tree_builder.rs
 +++ b/src/tree_builder.rs
-@@ -49 +49,5 @@ where
+@@ -49 +49,6 @@ where
 -        let Info { size, children } = get_info(&path);
 +        let Info {
 +            size,
 +            is_directory,
++            cloud_placeholder,
 +            children,
 +        } = get_info(&path);
-@@ -63 +67,3 @@ where
+@@ -63,2 +68,4 @@ where
 -        if max_depth > 0 {
+-            DataTree::dir(name, size, children.collect())
 +        if !is_directory {
-+            DataTree::file(name, size)
++            DataTree::file(name, size).with_cloud_placeholder(cloud_placeholder)
 +        } else if max_depth > 0 {
++            DataTree::dir(name, size, children.collect()).with_cloud_placeholder(cloud_placeholder)
+@@ -66,2 +73,34 @@ where
+-            let size = size + children.map(|child| child.size()).sum();
+-            DataTree::dir(name, size, Vec::new())
++            let (descendant_size, cloud_files, cloud_folders, total_files, total_folders) =
++                children
++                    .map(|child| {
++                        let (cloud_files, cloud_folders) = child.cloud_skipped_counts();
++                        let (total_files, total_folders) = child.total_counts();
++                        (
++                            child.size(),
++                            cloud_files,
++                            cloud_folders,
++                            total_files,
++                            total_folders,
++                        )
++                    })
++                    .reduce(
++                        || (Size::default(), 0, 0, 0, 0),
++                        |left, right| {
++                            (
++                                left.0 + right.0,
++                                left.1 + right.1,
++                                left.2 + right.2,
++                                left.3 + right.3,
++                                left.4 + right.4,
++                            )
++                        },
++                    );
++            DataTree::collapsed_dir(
++                name,
++                size + descendant_size,
++                cloud_files,
++                cloud_folders,
++                total_files,
++                total_folders,
++            )
++            .with_cloud_placeholder(cloud_placeholder)
 diff --git a/src/tree_builder/info.rs b/src/tree_builder/info.rs
-index c6a72d2..38eb084 100644
+index c6a72d2..aef5a74 100644
 --- a/src/tree_builder/info.rs
 +++ b/src/tree_builder/info.rs
-@@ -9,0 +10,2 @@ pub struct Info<Name, Size: size::Size> {
+@@ -9,0 +10,4 @@ pub struct Info<Name, Size: size::Size> {
 +    /// Whether the path represented by this node is a directory.
 +    pub is_directory: bool,
++    /// Whether this node is cloud-only or could not be entered safely.
++    pub cloud_placeholder: bool,
+diff --git a/tests/duckdisk_cloud_summary.rs b/tests/duckdisk_cloud_summary.rs
+new file mode 100644
+index 0000000..baf2cef
+--- /dev/null
++++ b/tests/duckdisk_cloud_summary.rs
+@@ -0,0 +1,59 @@
++#![cfg(target_os = "macos")]
++
++use std::{
++    fs,
++    process::Command,
++    time::{SystemTime, UNIX_EPOCH},
++};
++
++#[test]
++fn counts_pruned_cloud_only_files_without_emitting_per_file_errors() {
++    let nonce = SystemTime::now()
++        .duration_since(UNIX_EPOCH)
++        .unwrap()
++        .as_nanos();
++    let root = std::env::temp_dir().join(format!(
++        "duckdisk-cloud-summary-{}-{nonce}",
++        std::process::id()
++    ));
++    let mirror =
++        root.join("Group Containers/UBF8T346G9.OneDriveSyncClientSuite/OneDrive.noindex/OneDrive");
++    fs::create_dir_all(&mirror).unwrap();
++    let remote_only = mirror.join("remote-only.bin");
++    let file = fs::OpenOptions::new()
++        .create_new(true)
++        .write(true)
++        .open(&remote_only)
++        .unwrap();
++    file.set_len(64 * 1024 * 1024).unwrap();
++    let output = Command::new(env!("CARGO_BIN_EXE_pdu"))
++        .args([
++            "--json-output",
++            "--quantity=dual-size",
++            "--threads=max",
++            "--max-depth=1",
++            "--min-ratio=0",
++        ])
++        .arg(&root)
++        .output()
++        .unwrap();
++    fs::remove_dir_all(&root).unwrap();
++    assert!(
++        output.status.success(),
++        "{}",
++        String::from_utf8_lossy(&output.stderr)
++    );
++    assert!(!String::from_utf8_lossy(&output.stderr).contains("cloud placeholder skipped"));
++    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
++    assert_eq!(parsed["tree"]["cloudSkippedFiles"], 1);
++    assert_eq!(parsed["tree"]["totalFiles"], 1);
++    assert!(parsed["tree"]["totalFolders"].as_u64().unwrap_or_default() >= 5);
++    assert_eq!(
++        parsed["tree"]["cloudSkippedFolders"]
++            .as_u64()
++            .unwrap_or_default(),
++        0
++    );
++    assert_eq!(parsed["tree"]["children"].as_array().unwrap().len(), 0);
++    assert!(parsed["tree"]["size"]["apparent"].as_u64().unwrap() < 1024);
++}
