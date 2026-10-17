@@ -18,20 +18,6 @@ The app is built with Tauri, Rust, React, and the `pdu` scanner.
 
 Website: https://duckdisk.com/
 
-## What's New in v0.6.5
-
-Mac App Store 0.6.5 includes these fixes. The direct download remains v0.6.4 with the same fixes in its September 30 replacement build.
-
-- Local scans now disable automatic cloud materialization before scanning and mark skipped cloud-only content explicitly instead of presenting it as empty.
-- Cloud-only files are summarized as one scan issue rather than one warning per file. File and folder totals now include descendants omitted from the displayed tree depth.
-- OneDrive's known cloud-only sync mirror no longer inflates logical size; ordinary sparse files elsewhere keep their logical size.
-- Added cloud request timeouts and prompt scan cancellation. Trash moves have more time to complete and are not blindly retried when the outcome is uncertain.
-- Corrected apparent and allocated totals to preserve the scanner's hard-link deduplication during display, incremental updates, and folder refreshes.
-- Added disk total, macOS used, color-coded free space, and **Unscanned** statistics to whole-volume results. The question-mark button explains usage outside the scan without inventing per-category sizes.
-- Fixed missing permission-error reports and preserved scan issues in cached results, with a warning button for unreadable paths.
-- Added **Copy Current Path** to the result toolbar and removed the redundant Selected column.
-- Refreshes live disk usage after local deletions. Older scan caches are rebuilt once for accurate totals.
-
 ## Screenshots
 
 ### Scan a Local Disk

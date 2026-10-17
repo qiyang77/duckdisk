@@ -333,26 +333,6 @@ h3 {
   margin: 6px 0 0;
 }
 
-.release-highlight {
-  border-left: 2px solid var(--duck);
-  color: var(--paper-muted);
-  font-size: 15px;
-  line-height: 1.6;
-  margin: 22px 0 0;
-  padding-left: 14px;
-}
-
-.release-highlight strong {
-  color: var(--duck);
-  margin-right: 8px;
-}
-
-.release-highlight a {
-  color: var(--paper);
-  font-weight: 700;
-  margin-left: 5px;
-}
-
 .hero-scroll {
   bottom: 30px;
   color: #e5e8df;
