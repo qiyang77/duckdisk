@@ -44,6 +44,11 @@ jobs:
       - name: Build web
         run: npm run build
 
+      - name: Check selection and scan totals
+        run: |
+          npm run test:file-selection
+          npm run test:scan-totals
+
       - name: Import Developer ID certificate
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}

@@ -2,6 +2,8 @@ mod cloud_io;
 #[cfg(feature = "google-drive")]
 mod google_drive;
 mod local_files;
+#[cfg(target_os = "macos")]
+mod macos_window_state;
 mod no_cloud_download;
 mod oauth_config;
 mod onedrive;
@@ -29,6 +31,7 @@ use std::time::Duration;
 use sysinfo::{DiskExt, System, SystemExt};
 use tauri::Manager;
 use tauri_plugin_shell::process::CommandChild;
+#[cfg(not(target_os = "macos"))]
 use tauri_plugin_window_state::StateFlags;
 
 const INSTANCE_ADDRESS: &str = "127.0.0.1:53337";
@@ -71,12 +74,11 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(
-            tauri_plugin_window_state::Builder::default()
-                .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
-                .build(),
-        )
         .setup(move |app| {
+            #[cfg(target_os = "macos")]
+            if let Err(error) = macos_window_state::restore(app.handle()) {
+                eprintln!("Could not restore window frame: {error}");
+            }
             if let Some(listener) = instance_listener {
                 start_instance_listener(listener, app.handle().clone());
             }
@@ -94,6 +96,13 @@ fn main() {
             }
         })
         .manage(MyState(Default::default()));
+
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(
+        tauri_plugin_window_state::Builder::default()
+            .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
+            .build(),
+    );
 
     #[cfg(feature = "direct")]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
@@ -180,10 +189,32 @@ fn main() {
         show_in_folder
     ]);
 
-    let app = builder
-        .build(tauri::generate_context!())
-        .expect("error while building tauri application");
+    let context = tauri::generate_context!();
+    #[cfg(target_os = "macos")]
+    let context = {
+        let mut context = context;
+        if let Some(window) = context
+            .config_mut()
+            .app
+            .windows
+            .iter_mut()
+            .find(|w| w.label == "main")
+        {
+            // Do not queue default centering after restoring logical bounds.
+            // Show and focus the restored window when the event loop is ready.
+            window.center = false;
+            window.visible = false;
+        }
+        context
+    };
+    let app = builder.build(context).expect("error while building tauri application");
     app.run(move |app_handle, event| match event {
+        tauri::RunEvent::Ready => {
+            if let Some(window) = app_handle.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }
         tauri::RunEvent::ExitRequested { api, code, .. } => {
             // Command-Q and Dock > Quit do not necessarily pass through CloseRequested.
             // Delay their first exit request through the same cleanup path.
@@ -192,7 +223,13 @@ fn main() {
                 begin_graceful_exit(app_handle.clone(), &exit_started, code.unwrap_or(0));
             }
         }
-        tauri::RunEvent::Exit => scan::stop_all(&app_handle.state::<MyState>()),
+        tauri::RunEvent::Exit => {
+            #[cfg(target_os = "macos")]
+            if let Err(error) = macos_window_state::save(app_handle) {
+                eprintln!("Could not save window frame: {error}");
+            }
+            scan::stop_all(&app_handle.state::<MyState>());
+        }
         _ => {}
     });
 }
@@ -206,6 +243,10 @@ fn begin_graceful_exit(
         return;
     }
 
+    #[cfg(target_os = "macos")]
+    if let Err(error) = macos_window_state::save(&app_handle) {
+        eprintln!("Could not save window frame: {error}");
+    }
     scan::stop_all(&app_handle.state::<MyState>());
     tauri::async_runtime::spawn(async move {
         // Give killed sidecars and outstanding WebKit custom-protocol callbacks a chance to

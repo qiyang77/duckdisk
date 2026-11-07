@@ -990,6 +990,69 @@ a:focus-visible,
   text-transform: uppercase;
 }
 
+.tree-pane-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+.tree-selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #b9dce9;
+  font-weight: 500;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.tree-selection-actions .button {
+  min-height: 24px;
+  padding: 3px 7px;
+  font-size: 10px;
+}
+
+.tree-clear-selection {
+  color: #a5afb7;
+}
+
+.tree-clear-selection:hover:not(:disabled) {
+  color: #fff;
+}
+
+.tree-clear-selection:disabled {
+  opacity: 0.5;
+}
+
+.data-table .tree-select-cell {
+  width: 32px;
+  min-width: 32px;
+  padding: 0 7px;
+  text-align: center;
+}
+
+.tree-checkbox {
+  width: 14px;
+  height: 14px;
+  vertical-align: middle;
+  accent-color: #48b7dd;
+  color-scheme: dark;
+  cursor: pointer;
+}
+
+.tree-checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.tree-checkbox:focus-visible {
+  outline: 2px solid #71c8e6;
+  outline-offset: 2px;
+}
+
 .data-table {
   color: #cbd2d7;
   font-variant-numeric: tabular-nums;
@@ -1053,6 +1116,15 @@ a:focus-visible,
 .data-row:hover,
 .data-table tbody tr:nth-child(even):hover {
   background: #20262b;
+}
+
+.data-table tbody tr.data-row-selected,
+.data-table tbody tr.data-row-selected:hover {
+  background: #19323f;
+}
+
+.data-row-selected > td:first-child {
+  box-shadow: inset 2px 0 #48b7dd;
 }
 
 .data-row-parent {
@@ -1374,6 +1446,104 @@ a:focus-visible,
   border-color: #de686f;
   background: rgba(200, 72, 80, 0.08);
   color: #f08a8f;
+}
+
+.delete-list-trigger {
+  display: block;
+  width: 100%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.delete-list-trigger:hover,
+.delete-list-trigger:focus-visible {
+  border-color: #71c8e6;
+  color: #d6e4eb;
+}
+
+.delete-list-trigger:focus-visible {
+  outline: 2px solid #71c8e6;
+  outline-offset: 2px;
+}
+
+.delete-list-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #dce1e4;
+  font-weight: 600;
+}
+
+.delete-list-review {
+  flex-shrink: 0;
+  color: #71c8e6;
+  font-size: 10px;
+}
+
+.delete-list-preview {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delete-list-dialog {
+  display: flex;
+  width: min(760px, 100%);
+  max-height: min(680px, calc(100vh - 48px));
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.delete-list-dialog .dialog-header {
+  flex-shrink: 0;
+}
+
+.delete-list-items {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.delete-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-bottom: 1px solid #30373d;
+  font-size: 12px;
+}
+
+.delete-list-item:last-child {
+  border-bottom: 0;
+}
+
+.delete-list-name,
+.delete-list-path {
+  overflow-wrap: anywhere;
+}
+
+.delete-list-name {
+  color: #e3e8eb;
+  font-weight: 600;
+}
+
+.delete-list-path {
+  margin-top: 3px;
+  color: #939fa9;
+  font-size: 11px;
+  user-select: text;
+}
+
+.delete-list-empty {
+  padding: 32px 16px;
+  color: #939fa9;
+  font-size: 12px;
+  text-align: center;
 }
 
 .delete-progress-track {

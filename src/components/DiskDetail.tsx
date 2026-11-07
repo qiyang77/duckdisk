@@ -10,6 +10,12 @@ import { formatBytes } from "../formatBytes";
 import { diskUsageTone } from "../diskUsageTone";
 import { adjustedScanTotal } from "../scanTotals";
 import {
+  emptyFileSelection,
+  mergeDeleteCandidates,
+  selectFile,
+} from "../fileSelection";
+import DeleteListDialog from "./DeleteListDialog";
+import {
   type DiskRouteState,
   readDiskRoute,
   rememberDiskRoute,
@@ -31,6 +37,7 @@ import {
   Folder as FolderIcon,
   FolderOpen,
   FolderUp,
+  ListChecks,
   RefreshCw,
   RotateCcw,
   ShieldCheck,
@@ -133,7 +140,7 @@ type CloudDeleteResult = {
 };
 
 type DragSession = {
-  node: DiskItem;
+  nodes: DiskItem[];
   startX: number;
   startY: number;
   x: number;
@@ -142,7 +149,7 @@ type DragSession = {
 };
 
 type DragPreview = {
-  node: DiskItem;
+  nodes: DiskItem[];
   x: number;
   y: number;
 };
@@ -842,6 +849,10 @@ const Scanning = () => {
       sessionStorage.getItem(credentialNoticeKey(source)) === "true"
   );
   const [deleteList, setDeleteList] = useState<DiskItem[]>([]);
+  const [selection, setSelection] = useState(emptyFileSelection);
+  const [selectionExpanded, setSelectionExpanded] = useState(false);
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  const [showDeleteList, setShowDeleteList] = useState(false);
   const [showPermanentDeleteConfirmation, setShowPermanentDeleteConfirmation] =
     useState(false);
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
@@ -1146,6 +1157,8 @@ const Scanning = () => {
       setCurrentNode(event.data.tree);
       setExpandedIds(new Set());
       setDeleteList([]);
+      setSelection(emptyFileSelection());
+      setSelectionExpanded(false);
       setView("disk");
     };
 
@@ -1159,6 +1172,10 @@ const Scanning = () => {
       setScanIssueReport(emptyScanErrorReport);
       setShowScanIssues(false);
       setShowUnscannedDetails(false);
+      setShowDeleteList(false);
+      setShowPermanentDeleteConfirmation(false);
+      setSelection(emptyFileSelection());
+      setSelectionExpanded(false);
       setDeleteList([]);
       setDeletedIds(new Set());
       setScanPhase(scanNonce === 0 ? "checkingCache" : "scanning");
@@ -1300,7 +1317,8 @@ const Scanning = () => {
       session.active = true;
       session.x = event.clientX;
       session.y = event.clientY;
-      setDragPreview({ node: session.node, x: event.clientX, y: event.clientY });
+      event.preventDefault();
+      setDragPreview({ nodes: session.nodes, x: event.clientX, y: event.clientY });
 
       const rect = dropZoneRef.current?.getBoundingClientRect();
       setDeleteTargetActive(
@@ -1329,7 +1347,7 @@ const Scanning = () => {
           event.clientY >= rect.top &&
           event.clientY <= rect.bottom
         ) {
-          addDeleteTarget(session.node);
+          addDeleteTargets(session.nodes);
         }
         suppressClickUntil.current = Date.now() + 250;
       }
@@ -1339,15 +1357,30 @@ const Scanning = () => {
       setDeleteTargetActive(false);
     };
 
+    const cancelPointerDrag = () => {
+      if (dragSession.current?.active) suppressClickUntil.current = Date.now() + 250;
+      dragSession.current = null;
+      setDragPreview(null);
+      setDeleteTargetActive(false);
+    };
+    const cancelOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") cancelPointerDrag();
+    };
+
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
+    window.addEventListener("pointercancel", cancelPointerDrag);
+    window.addEventListener("blur", cancelPointerDrag);
+    window.addEventListener("keydown", cancelOnEscape);
     return () => {
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
+      window.removeEventListener("pointercancel", cancelPointerDrag);
+      window.removeEventListener("blur", cancelPointerDrag);
+      window.removeEventListener("keydown", cancelOnEscape);
+      cancelPointerDrag();
     };
-  }, [rootNode, deletedIds]);
+  }, [rootNode, deletedIds, deleteState.isDeleting, isGoogleDrive]);
 
   const { parentMap, statsMap: originalStatsMap } = useMemo(
     () => buildIndex(rootNode),
@@ -1389,6 +1422,65 @@ const Scanning = () => {
     () => buildVisibleRows(childRows, expandedIds, compareTreeNodes),
     [childRows, compareTreeNodes, expandedIds]
   );
+  const canQueueNode = (node: DiskItem) =>
+    node.id !== "/" &&
+    node.id !== rootNode?.id &&
+    canTrashNode(node, isGoogleDrive) &&
+    !isDeletedPath(node.id, deletedIds);
+  const selectableRows = useMemo(
+    () => rows.filter(({ node }) => canQueueNode(node)),
+    [rows, rootNode?.id, isGoogleDrive, deletedIds]
+  );
+  const selectableIds = useMemo(
+    () => selectableRows.map(({ node }) => node.id),
+    [selectableRows]
+  );
+  const selectedNodes = useMemo(
+    () => selectableRows
+      .filter(({ node }) => selection.ids.has(node.id))
+      .map(({ node }) => node),
+    [selectableRows, selection.ids]
+  );
+  const allRowsSelected =
+    selectableIds.length > 0 && selectedNodes.length === selectableIds.length;
+  const contextDeleteNodes = contextMenu
+    ? selection.ids.has(contextMenu.node.id)
+      ? selectedNodes
+      : [contextMenu.node]
+    : [];
+  useEffect(() => {
+    setSelection(emptyFileSelection());
+    setSelectionExpanded(false);
+  }, [currentNode?.id]);
+  useEffect(() => {
+    const availableIds = new Set(selectableIds);
+    setSelection((current) => {
+      const ids = new Set([...current.ids].filter((id) => availableIds.has(id)));
+      const anchorId = current.anchorId && availableIds.has(current.anchorId)
+        ? current.anchorId
+        : null;
+      return ids.size === current.ids.size && anchorId === current.anchorId
+        ? current
+        : { ids, anchorId };
+    });
+  }, [selectableIds]);
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = selectedNodes.length > 0 && !allRowsSelected;
+    }
+  }, [selectedNodes.length, allRowsSelected, view, selectionExpanded]);
+  const selectRow = (node: DiskItem, range = false, toggle = false) => {
+    if (
+      deleteState.isDeleting ||
+      refreshingNodeId === node.id ||
+      Date.now() < suppressClickUntil.current
+    ) return;
+    if (!selectionExpanded && !range && !toggle) return;
+    if (range || toggle) setSelectionExpanded(true);
+    setSelection((current) =>
+      selectFile(current, selectableIds, node.id, { range, toggle })
+    );
+  };
   const virtualRange = useMemo(
     () =>
       calculateVirtualRange(
@@ -1480,7 +1572,7 @@ const Scanning = () => {
       y1: leaf.y1,
     }));
   }, [childRows, currentUsageSize, deletedIds, showsAllocated, statsMap]);
-  const treeColumnCount = showsAllocated ? 7 : 6;
+  const treeColumnCount = (showsAllocated ? 7 : 6) + (selectionExpanded ? 1 : 0);
 
   const sortTreeBy = (key: TreeSortKey) => {
     if (key !== "name") {
@@ -1576,36 +1668,24 @@ const Scanning = () => {
     }
   };
 
-  const addDeleteTarget = (node: DiskItem | null) => {
-    if (
-      !canDelete ||
-      !node ||
-      node.id === "/" ||
-      node.id === rootNode?.id ||
-      !canTrashNode(node, isGoogleDrive) ||
-      isDeletedPath(node.id, deletedIds)
-    ) {
-      return;
-    }
+  const addDeleteTargets = (nodes: DiskItem[]) => {
+    if (!canDelete || deleteState.isDeleting) return;
+    const candidates = nodes.filter(canQueueNode);
+    if (!candidates.length) return;
 
     setDeleteState((current) => ({
       ...current,
       error: null,
       failed: 0,
     }));
-    setDeleteList((current) => {
-      if (
-        current.some(
-          (item) => item.id === node.id || node.id.startsWith(`${item.id}/`)
-        )
-      ) {
-        return current;
-      }
-      return [
-        ...current.filter((item) => !item.id.startsWith(`${node.id}/`)),
-        node,
-      ];
-    });
+    setDeleteList((current) => mergeDeleteCandidates(current, candidates));
+    setSelection(emptyFileSelection());
+  };
+
+  const removeDeleteTarget = (id: string) => {
+    if (deleteState.isDeleting) return;
+    setDeleteList((current) => current.filter((item) => item.id !== id));
+    setDeleteState((current) => ({ ...current, error: null, failed: 0 }));
   };
 
   const refreshNode = async (
@@ -1725,7 +1805,12 @@ const Scanning = () => {
   ) => {
     if (
       !canDelete ||
+      deleteState.isDeleting ||
+      refreshingNodeId === node.id ||
       event.button !== 0 ||
+      event.shiftKey ||
+      event.metaKey ||
+      event.ctrlKey ||
       node.id === "/" ||
       node.id === rootNode?.id ||
       !canTrashNode(node, isGoogleDrive) ||
@@ -1734,8 +1819,10 @@ const Scanning = () => {
       return;
     }
 
+    const nodes = selection.ids.has(node.id) ? selectedNodes : [node];
+    if (!selection.ids.has(node.id)) selectRow(node);
     dragSession.current = {
-      node,
+      nodes,
       startX: event.clientX,
       startY: event.clientY,
       x: event.clientX,
@@ -1745,7 +1832,7 @@ const Scanning = () => {
   };
 
   const deleteSelected = async () => {
-    if (!deleteList.length) {
+    if (!deleteList.length || deleteState.isDeleting) {
       return;
     }
 
@@ -2192,8 +2279,45 @@ const Scanning = () => {
 
       <div className="results-split">
         <section className="data-pane">
-          <div className="pane-title">
-            Tree View
+          <div className="pane-title tree-pane-toolbar">
+            <span title="Use checkboxes or Shift-click to select multiple items">Tree View</span>
+            <div className="tree-selection-actions">
+              {selectedNodes.length > 0 && (
+                <>
+                <span aria-live="polite">{selectedNodes.length.toLocaleString()} selected</span>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  disabled={deleteState.isDeleting}
+                  onClick={() => addDeleteTargets(selectedNodes)}
+                >
+                  {usesTrash ? "Add to Trash List" : "Add to Delete List"}
+                </button>
+                <button
+                  type="button"
+                  className="tree-clear-selection"
+                  disabled={deleteState.isDeleting}
+                  onClick={() => setSelection(emptyFileSelection())}
+                >
+                  Deselect
+                </button>
+                </>
+              )}
+              <button
+                type="button"
+                className="button button-secondary"
+                aria-label={selectionExpanded ? "Hide selection checkboxes" : "Show selection checkboxes"}
+                aria-expanded={selectionExpanded}
+                disabled={deleteState.isDeleting}
+                onClick={() => {
+                  setSelectionExpanded(!selectionExpanded);
+                  setSelection(emptyFileSelection());
+                }}
+              >
+                <ListChecks size={12} />
+                {selectionExpanded ? "Done" : "Select"}
+              </button>
+            </div>
           </div>
           <div
             ref={treeViewportRef}
@@ -2202,10 +2326,26 @@ const Scanning = () => {
           >
             <table
               className="data-table w-full border-collapse text-xs"
+              aria-label="Scan results"
               aria-rowcount={rows.length + (parentNode ? 1 : 0) + 1}
             >
               <thead>
                 <tr aria-rowindex={1}>
+                  {selectionExpanded && <th className="data-header tree-select-cell">
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      className="tree-checkbox"
+                      aria-label="Select all listed items"
+                      title="Select all items in the current expanded view"
+                      checked={allRowsSelected}
+                      disabled={!selectableIds.length || deleteState.isDeleting}
+                      onChange={(event) => setSelection({
+                        ids: new Set(event.target.checked ? selectableIds : []),
+                        anchorId: event.target.checked ? selectableIds[0] : null,
+                      })}
+                    />
+                  </th>}
                   <SortableTableHeader
                     sortKey="name"
                     activeSort={treeSort}
@@ -2269,6 +2409,7 @@ const Scanning = () => {
                     className="data-row data-row-parent"
                     style={{ height: TREE_ROW_HEIGHT }}
                   >
+                    {selectionExpanded && <td className="tree-select-cell" />}
                     <td className="border-b border-slate-800 px-2 py-1.5 font-medium text-slate-100">
                       <FolderUp className="item-type-icon" size={14} />
                       <button
@@ -2353,13 +2494,16 @@ const Scanning = () => {
                       aria-rowindex={
                         virtualRange.start + index + (parentNode ? 3 : 2)
                       }
+                      aria-selected={selection.ids.has(node.id)}
                       onPointerDown={(event) => startPointerDrag(event, node, deleted)}
+                      onClick={(event) => selectRow(node, event.shiftKey, event.metaKey || event.ctrlKey)}
                       onContextMenu={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
                         if (deleted) {
                           return;
                         }
+                        if (!selection.ids.has(node.id)) selectRow(node);
                         setContextMenu({
                           node,
                           x: Math.min(event.clientX, window.innerWidth - 224),
@@ -2368,7 +2512,7 @@ const Scanning = () => {
                       }}
                       className={`data-row select-none ${
                         deleted ? "bg-red-950/20 text-red-300" : ""
-                      } ${refreshing ? "data-row-refreshing" : ""}`}
+                      } ${selection.ids.has(node.id) ? "data-row-selected" : ""} ${refreshing ? "data-row-refreshing" : ""}`}
                       style={{
                         height: TREE_ROW_HEIGHT,
                         ...(deleted
@@ -2380,6 +2524,23 @@ const Scanning = () => {
                           : {}),
                       }}
                     >
+                      {selectionExpanded && <td className="tree-select-cell">
+                        <input
+                          type="checkbox"
+                          className="tree-checkbox"
+                          aria-label={`Select ${getNodeName(node)}`}
+                          title="Select item; Shift-click to select a range"
+                          checked={selection.ids.has(node.id)}
+                          disabled={!canQueueNode(node) || refreshing || deleteState.isDeleting}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) => selectRow(
+                            node,
+                            Boolean((event.nativeEvent as MouseEvent).shiftKey),
+                            true
+                          )}
+                        />
+                      </td>}
                       <td
                         className={`max-w-[30rem] overflow-hidden border-b border-slate-800 px-2 py-1.5 ${
                           deleted
@@ -2441,8 +2602,13 @@ const Scanning = () => {
                           <button
                             disabled={deleted || refreshing}
                             title={getNodeName(node)}
-                            onClick={() => {
+                            onClick={(event) => {
+                              event.stopPropagation();
                               if (Date.now() < suppressClickUntil.current) {
+                                return;
+                              }
+                              if (event.shiftKey || event.metaKey || event.ctrlKey) {
+                                selectRow(node, event.shiftKey, event.metaKey || event.ctrlKey);
                                 return;
                               }
                               if (directory) {
@@ -2633,26 +2799,35 @@ const Scanning = () => {
             isDeleteTargetActive ? "delete-panel-active" : ""
           }`}
         >
-          <div
-            className={`delete-dropzone ${
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={showDeleteList}
+            aria-label={`${usesTrash ? "Trash List" : "Delete List"}, ${deleteList.length} items. View full list`}
+            onClick={() => {
+              if (Date.now() >= suppressClickUntil.current) setShowDeleteList(true);
+            }}
+            className={`delete-dropzone delete-list-trigger ${
               isDeleteTargetActive
                 ? "delete-dropzone-active"
                 : ""
             }`}
           >
             {deleteList.length === 0 ? (
-              usesTrash
-                ? `Drag files or folders here to move them to ${cloudTrashName}`
-                : isSsh
-                ? "Drag remote files or folders here to permanently delete"
-                : "Drag files or folders here to permanently delete"
+              "Select items above or drag files and folders here"
             ) : (
-              <div className="truncate text-left text-slate-200">
-                {deleteList.length} selected:{" "}
-                {deleteList.map((item) => getNodeName(item)).join(", ")}
-              </div>
+              <>
+                <span className="delete-list-summary">
+                  <span>{deleteList.length.toLocaleString()} item{deleteList.length === 1 ? "" : "s"} in {usesTrash ? "Trash List" : "Delete List"}</span>
+                  <span className="delete-list-review">View list</span>
+                </span>
+                <span className="delete-list-preview">
+                  {deleteList.slice(0, 3).map((item) => getNodeName(item)).join(", ")}
+                  {deleteList.length > 3 ? ", …" : ""}
+                </span>
+              </>
             )}
-          </div>
+          </button>
           {(deleteState.isDeleting || deleteState.error) && (
             <div className="mt-2">
               <div className="mb-1 flex items-center justify-between text-[11px] text-slate-400">
@@ -2690,6 +2865,7 @@ const Scanning = () => {
           <div className="mt-2 flex gap-2">
             <button
               onClick={() => {
+                if (Date.now() < suppressClickUntil.current) return;
                 setDeleteList([]);
                 setDeleteState({
                   isDeleting: false,
@@ -2706,6 +2882,7 @@ const Scanning = () => {
             </button>
             <button
               onClick={() => {
+                if (Date.now() < suppressClickUntil.current) return;
                 if (usesTrash) {
                   deleteSelected();
                 } else {
@@ -2736,7 +2913,9 @@ const Scanning = () => {
             top: dragPreview.y + 12,
           }}
         >
-          {getNodeName(dragPreview.node)}
+          {dragPreview.nodes.length > 1
+            ? `${dragPreview.nodes.length.toLocaleString()} selected items`
+            : getNodeName(dragPreview.nodes[0])}
         </div>
       )}
       {contextMenu && (
@@ -2751,7 +2930,7 @@ const Scanning = () => {
           }}
         >
           <div className="context-menu-title">
-            {getNodeName(contextMenu.node)}
+            {contextDeleteNodes.length > 1 ? `${contextDeleteNodes.length} selected items` : getNodeName(contextMenu.node)}
           </div>
           {isDirectory(contextMenu.node) && (
             <button
@@ -2801,27 +2980,34 @@ const Scanning = () => {
               <div className="context-menu-separator" />
               <button
                 role="menuitem"
-                disabled={!canTrashNode(contextMenu.node, isGoogleDrive)}
+                disabled={!canQueueNode(contextMenu.node) || deleteState.isDeleting}
                 title={
                   canTrashNode(contextMenu.node, isGoogleDrive)
                     ? undefined
                     : "You do not have permission to move this item to Trash"
                 }
                 onClick={() => {
-                  addDeleteTarget(contextMenu.node);
+                  addDeleteTargets(contextDeleteNodes);
                   setContextMenu(null);
                 }}
                 className="context-menu-item context-menu-item-danger disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {usesTrash && !canTrashNode(contextMenu.node, isGoogleDrive)
                   ? "Cannot Move to Trash"
-                  : usesTrash
-                  ? "Add to Trash List"
-                  : "Add to Delete List"}
+                  : `Add${contextDeleteNodes.length > 1 ? ` ${contextDeleteNodes.length} items` : ""} to ${usesTrash ? "Trash" : "Delete"} List`}
               </button>
             </>
           )}
         </div>
+      )}
+      {showDeleteList && (
+        <DeleteListDialog
+          items={deleteList}
+          usesTrash={usesTrash}
+          isDeleting={deleteState.isDeleting}
+          onClose={() => setShowDeleteList(false)}
+          onRemove={removeDeleteTarget}
+        />
       )}
       {showPermanentDeleteConfirmation && (
         <div className="modal-backdrop">

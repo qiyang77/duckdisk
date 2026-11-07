@@ -5,8 +5,11 @@ root_dir="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root_dir"
 
 export CI=true
+# Keep compile-time proc macros loadable on macOS with the Rust/LLVM strip bug.
+export CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG="${CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG:-2}"
+export CARGO_PROFILE_RELEASE_STRIP="${CARGO_PROFILE_RELEASE_STRIP:-none}"
 version="$(node -p "require('./package.json').version")"
-build_number="${MAS_BUILD_NUMBER:-515}"
+build_number="${MAS_BUILD_NUMBER:-518}"
 mas_target="universal-apple-darwin"
 store_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/duckdisk-mas.XXXXXX")"
 store_source_dir="$store_work_dir/source"

@@ -5,6 +5,10 @@ root_dir="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root_dir"
 
 export CI=true
+# Avoid Rust/LLVM's stripped proc-macro LINKEDIT alignment bug on newer macOS.
+# This retains debug info in build-time tools, not in the shipped application.
+export CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG="${CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG:-2}"
+export CARGO_PROFILE_RELEASE_STRIP="${CARGO_PROFILE_RELEASE_STRIP:-none}"
 export APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-Developer ID Application: Qi Yang (PH4H68P6G5)}"
 
 if [[ -z "${TAURI_PRIVATE_KEY:-}" && -f "$HOME/.tauri/duckdisk-updater.key" ]]; then

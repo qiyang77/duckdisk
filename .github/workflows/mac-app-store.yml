@@ -6,7 +6,7 @@ on:
       build_number:
         description: App Store build number (must increase for every upload)
         required: true
-        default: "515"
+        default: "518"
         type: string
       upload:
         description: Upload the validated package to App Store Connect
@@ -21,7 +21,7 @@ on:
       whats_new:
         description: Text to use for What's New in every App Store localization
         required: false
-        default: "Added native Intel support, Copy Full Path, and window size and position restoration."
+        default: "Added multi-select and a full candidate list. Fixed window size and position restoration across displays."
         type: string
       promotional_text:
         description: Promotional Text to use in every App Store localization
@@ -61,6 +61,12 @@ jobs:
       - name: Install dependencies
         if: inputs.upload || !inputs.submit
         run: npm ci
+
+      - name: Check selection and scan totals
+        if: inputs.upload || !inputs.submit
+        run: |
+          npm run test:file-selection
+          npm run test:scan-totals
 
       - name: Import Mac App Store certificates
         if: inputs.upload || !inputs.submit
