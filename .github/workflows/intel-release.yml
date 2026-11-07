@@ -6,13 +6,8 @@ on:
       release_tag:
         description: "Existing release tag to supplement with Intel artifacts"
         required: true
-        default: "v0.6.2"
+        default: "v0.6.6"
         type: string
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/intel-release.yml"
 
 permissions:
   contents: write
@@ -21,7 +16,7 @@ jobs:
   release-intel:
     runs-on: macos-15-intel
     env:
-      RELEASE_TAG: ${{ github.event.inputs.release_tag || 'v0.6.2' }}
+      RELEASE_TAG: ${{ github.event.inputs.release_tag || 'v0.6.6' }}
       MACOSX_DEPLOYMENT_TARGET: "12.0"
 
     steps:
@@ -110,6 +105,36 @@ jobs:
           security list-keychains -d user -s "$keychain_path"
           rm -f "$certificate_path"
           echo "DUCKDISK_SIGNING_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+
+      - name: Retry transient Apple ticket service failures
+        shell: bash
+        run: |
+          set -euo pipefail
+          retry_bin="$RUNNER_TEMP/duckdisk-retry-bin"
+          mkdir -p "$retry_bin"
+          cat > "$retry_bin/xcrun" <<'WRAPPER'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [[ "${1:-}" != "stapler" ]]; then
+            exec /usr/bin/xcrun "$@"
+          fi
+          for attempt in 1 2 3 4 5; do
+            if /usr/bin/xcrun "$@"; then
+              exit 0
+            else
+              status=$?
+            fi
+            # Error 68 is the ticket-delivery connection failure. Other errors
+            # must fail immediately, including invalid signatures or tickets.
+            if [[ "$status" -ne 68 || "$attempt" -eq 5 ]]; then
+              exit "$status"
+            fi
+            echo "Apple ticket service unavailable; retrying stapler ($attempt/5)..." >&2
+            sleep "$((attempt * 5))"
+          done
+          WRAPPER
+          chmod +x "$retry_bin/xcrun"
+          echo "$retry_bin" >> "$GITHUB_PATH"
 
       - name: Build, sign, and notarize Intel release
         env:
