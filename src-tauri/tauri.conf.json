@@ -40,7 +40,7 @@
   },
   "productName": "DuckDisk",
   "mainBinaryName": "DuckDisk",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "identifier": "com.duckdisk.dev",
   "plugins": {
     "updater": {

@@ -44,10 +44,11 @@ jobs:
       - name: Build web
         run: npm run build
 
-      - name: Check selection and scan totals
+      - name: Check selection, scan totals, and review requests
         run: |
           npm run test:file-selection
           npm run test:scan-totals
+          npm run test:app-review
 
       - name: Import Developer ID certificate
         env:
@@ -145,48 +146,49 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          install_notes_file="$(mktemp)"
-          cat > "$install_notes_file" <<'NOTES'
-          Installation: Download the DMG for your Mac and drag DuckDisk into Applications.
+          version="${GITHUB_REF_NAME#v}"
+          release_notes_file="$(mktemp)"
+          printf "### What's new\n\n" > "$release_notes_file"
+          curated_notes_file="release-notes/${GITHUB_REF_NAME#v}.md"
+          if [[ -s "$curated_notes_file" ]]; then
+            cat "$curated_notes_file" >> "$release_notes_file"
+          else
+            previous_tag="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+            if [[ -n "$previous_tag" ]]; then
+              git log --no-merges --max-count=5 --format='- %s' \
+                "$previous_tag..$GITHUB_REF_NAME" >> "$release_notes_file"
+            else
+              git log --no-merges --max-count=5 --format='- %s' \
+                "$GITHUB_REF_NAME" >> "$release_notes_file"
+            fi
+          fi
+          cat >> "$release_notes_file" <<NOTES
+
+          ### Downloads
+
+          - Apple Silicon: DuckDisk_${version}_arm64.dmg
+          - Intel: DuckDisk_${version}_x86_64.dmg
           NOTES
           if [[ "${SKIP_NOTARIZATION:-0}" == "1" ]]; then
-            cat >> "$install_notes_file" <<'NOTES'
+            cat >> "$release_notes_file" <<'NOTES'
 
-          Developer ID signed; not notarized by Apple.
+          Both editions are signed with a Developer ID certificate; not notarized by Apple.
           NOTES
           else
-            echo "Developer ID signed and notarized by Apple." >> "$install_notes_file"
+            cat >> "$release_notes_file" <<'NOTES'
+
+          Both editions are signed with a Developer ID certificate and notarized by Apple.
+          NOTES
           fi
+          cat >> "$release_notes_file" <<'NOTES'
+
+          **Installation**: Download the correct .dmg, open it, and drag DuckDisk into Applications.
+          NOTES
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            release_notes_file="$(mktemp)"
-            curated_notes_file="release-notes/${GITHUB_REF_NAME#v}.md"
-            if [[ -s "$curated_notes_file" ]]; then
-              cp "$curated_notes_file" "$release_notes_file"
-            else
-              previous_tag="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
-              {
-                if [[ -n "$previous_tag" ]]; then
-                  git log --no-merges --max-count=5 --format='- %s' \
-                    "$previous_tag..$GITHUB_REF_NAME"
-                else
-                  git log --no-merges --max-count=5 --format='- %s' "$GITHUB_REF_NAME"
-                fi
-              } > "$release_notes_file"
-            fi
-            {
-              echo
-              cat "$install_notes_file"
-            } >> "$release_notes_file"
             gh release create "$GITHUB_REF_NAME" \
               --title "DuckDisk $GITHUB_REF_NAME" \
               --notes-file "$release_notes_file"
-          elif ! gh release view "$GITHUB_REF_NAME" --json body --jq .body | grep -Fq "Installation:"; then
-            release_notes_file="$(mktemp)"
-            gh release view "$GITHUB_REF_NAME" --json body --jq .body > "$release_notes_file"
-            {
-              echo
-              cat "$install_notes_file"
-            } >> "$release_notes_file"
+          else
             gh release edit "$GITHUB_REF_NAME" --notes-file "$release_notes_file"
           fi
           gh release upload "$GITHUB_REF_NAME" \

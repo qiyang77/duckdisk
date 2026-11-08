@@ -341,9 +341,9 @@ const credentialNoticeKey = (source: string) =>
 const reviewFirstSuccessfulScanKey = "duckdisk-review-first-successful-scan-at";
 const reviewSuccessfulScanCountKey = "duckdisk-review-successful-scan-count";
 const reviewLastRequestKey = "duckdisk-review-last-request-at";
-const reviewMinimumSuccessfulScans = 3;
-const reviewMinimumAgeMs = 3 * 24 * 60 * 60 * 1000;
-const reviewRequestCooldownMs = 120 * 24 * 60 * 60 * 1000;
+const reviewMinimumSuccessfulScans = 2;
+const reviewMinimumAgeMs = 24 * 60 * 60 * 1000;
+const reviewRequestCooldownMs = 30 * 24 * 60 * 60 * 1000;
 
 const recordSuccessfulScanForReview = async () => {
   if (!isMacAppStore) return;
@@ -983,8 +983,9 @@ const Scanning = () => {
       return;
     }
 
-    reviewRecordedForScan.current = true;
     const timer = window.setTimeout(() => {
+      // A tree refresh can cancel this timer. Consume the scan only when it runs.
+      reviewRecordedForScan.current = true;
       void recordSuccessfulScanForReview().catch((error) =>
         console.warn("Could not request an App Store rating", error)
       );
